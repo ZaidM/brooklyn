@@ -59,12 +59,9 @@ public class HttpPollValue {
 
     public HttpPollValue(int responseCode, Map<String,List<String>> headers, byte[] content,
             long startTime, long durationMillisOfFirstResponse, long durationMillisOfFullContent) {
-
-        Map<String, List<String>> headerListsMutable = Maps.newLinkedHashMap();
-        headerListsMutable.putAll(headers);
-        headerLists = Collections.unmodifiableMap(headerListsMutable);
         this.response = null;
         this.responseCode = responseCode;
+        this.headerLists = Collections.unmodifiableMap(headers);
         this.content = content;
         this.startTime = startTime;
         this.durationMillisOfFirstResponse = durationMillisOfFirstResponse;
