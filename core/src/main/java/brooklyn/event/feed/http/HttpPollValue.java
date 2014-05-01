@@ -13,6 +13,7 @@ import org.apache.http.HttpResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import brooklyn.util.collections.MutableMap;
 import brooklyn.util.time.Time;
 import brooklyn.util.stream.Streams;
 
@@ -61,7 +62,7 @@ public class HttpPollValue {
             long startTime, long durationMillisOfFirstResponse, long durationMillisOfFullContent) {
         this.response = null;
         this.responseCode = responseCode;
-        this.headerLists = Collections.unmodifiableMap(headers);
+        this.headerLists = Collections.unmodifiableMap(MutableMap.copyOf(headers));
         this.content = content;
         this.startTime = startTime;
         this.durationMillisOfFirstResponse = durationMillisOfFirstResponse;
