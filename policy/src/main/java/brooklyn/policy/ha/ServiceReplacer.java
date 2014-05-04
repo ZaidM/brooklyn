@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import brooklyn.config.ConfigKey;
+import brooklyn.entity.Entity;
 import brooklyn.entity.Group;
 import brooklyn.entity.basic.Attributes;
 import brooklyn.entity.basic.ConfigKeys;
@@ -19,6 +20,7 @@ import brooklyn.entity.basic.Entities;
 import brooklyn.entity.basic.EntityInternal;
 import brooklyn.entity.basic.EntityLocal;
 import brooklyn.entity.basic.Lifecycle;
+import brooklyn.entity.group.StopFailedRuntimeException;
 import brooklyn.entity.trait.MemberReplaceable;
 import brooklyn.event.Sensor;
 import brooklyn.event.SensorEvent;
@@ -29,6 +31,7 @@ import brooklyn.policy.basic.AbstractPolicy;
 import brooklyn.policy.ha.HASensors.FailureDescriptor;
 import brooklyn.util.collections.MutableMap;
 import brooklyn.util.config.ConfigBag;
+import brooklyn.util.exceptions.Exceptions;
 import brooklyn.util.flags.SetFromFlag;
 
 import com.google.common.base.Ticker;
@@ -93,51 +96,67 @@ public class ServiceReplacer extends AbstractPolicy {
     }
 
     @Override
-    public void setEntity(EntityLocal entity) {
+    public void setEntity(final EntityLocal entity) {
         checkArgument(entity instanceof MemberReplaceable, "ServiceReplacer must take a MemberReplaceable, not %s", entity);
         Sensor<?> failureSensorToMonitor = checkNotNull(getConfig(FAILURE_SENSOR_TO_MONITOR), "failureSensorToMonitor");
         
         super.setEntity(entity);
 
         subscribeToMembers((Group)entity, failureSensorToMonitor, new SensorEventListener<Object>() {
-                @Override public void onEvent(SensorEvent<Object> event) {
-                    onDetectedFailure(event);
+                @Override public void onEvent(final SensorEvent<Object> event) {
+                    // Must execute in another thread - if we called entity.replaceMember in the event-listener's thread
+                    // then we'd block all other events being delivered to this entity's other subscribers.
+                    // Relies on synchronization of `onDetectedFailure`.
+                    // See same pattern used in ServiceRestarter.
+                    
+                    // TODO Could use BasicExecutionManager.setTaskSchedulerForTag to prevent race of two
+                    // events being received in rapid succession, and onDetectedFailure being executed out-of-order
+                    // for them; or could write events to a blocking queue and have onDetectedFailure read from that.
+                    
+                    if (isRunning()) {
+                        LOG.warn("ServiceReplacer notified; dispatching job for "+entity+" ("+event.getValue()+")");
+                        ((EntityInternal)entity).getExecutionContext().submit(MutableMap.of(), new Runnable() {
+                            @Override public void run() {
+                                onDetectedFailure(event);
+                            }});
+                    } else {
+                        LOG.warn("ServiceReplacer not running, so not acting on failure detected at "+entity+" ("+event.getValue()+", child of "+entity+")");
+                    }
                 }
             });
     }
     
     // TODO semaphores would be better to allow at-most-one-blocking behaviour
-    protected synchronized void onDetectedFailure(final SensorEvent<Object> event) {
+    protected synchronized void onDetectedFailure(SensorEvent<Object> event) {
+        final Entity failedEntity = event.getSource();
+        final Object reason = event.getValue();
+        
         if (isSuspended()) {
-            LOG.warn("ServiceReplacer suspended, so not acting on failure detected at "+event.getSource()+" ("+event.getValue()+", child of "+entity+")");
+            LOG.warn("ServiceReplacer suspended, so not acting on failure detected at "+failedEntity+" ("+reason+", child of "+entity+")");
             return;
         }
 
         if (isRepeatedlyFailingTooMuch()) {
-            LOG.error("ServiceReplacer not acting on failure detected at "+event.getSource()+" ("+event.getValue()+", child of "+entity+"), because too many recent replacement failures");
+            LOG.error("ServiceReplacer not acting on failure detected at "+failedEntity+" ("+reason+", child of "+entity+"), because too many recent replacement failures");
             return;
         }
         
-        LOG.warn("ServiceReplacer acting on failure detected at "+event.getSource()+" ("+event.getValue()+", child of "+entity+")");
+        LOG.warn("ServiceReplacer acting on failure detected at "+failedEntity+" ("+reason+", child of "+entity+")");
         ((EntityInternal)entity).getManagementSupport().getExecutionContext().submit(MutableMap.of(), new Runnable() {
 
             @Override
             public void run() {
                 try {
-                    Entities.invokeEffectorWithArgs(entity, entity, MemberReplaceable.REPLACE_MEMBER, event.getSource().getId()).get();
+                    Entities.invokeEffectorWithArgs(entity, entity, MemberReplaceable.REPLACE_MEMBER, failedEntity.getId()).get();
                     consecutiveReplacementFailureTimes.clear();
                 } catch (Exception e) {
-                    // FIXME replaceMember fails if stop fails on the old node; should resolve that more gracefully than this
-                    if (e.toString().contains("stopping") && e.toString().contains(event.getSource().getId())) {
-                        LOG.info("ServiceReplacer: ignoring error reported from stopping failed node "+event.getSource());
+                    if (Exceptions.getFirstThrowableOfType(e, StopFailedRuntimeException.class) != null) {
+                        LOG.info("ServiceReplacer: ignoring error reported from stopping failed node "+failedEntity);
                         return;
                     }
-
-                    onReplacementFailed("Replace failure (error "+e+") at "+entity+": "+event.getValue());
+                    onReplacementFailed("Replace failure (error "+e+") at "+entity+": "+reason);
                 }
-
             }
-
         });
     }
 
