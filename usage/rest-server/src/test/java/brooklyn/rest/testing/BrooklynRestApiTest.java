@@ -40,6 +40,7 @@ public abstract class BrooklynRestApiTest extends ResourceTest {
             } else {
                 manager = new LocalManagementContextForTests();
             }
+            manager.getHighAvailabilityManager().disabled();
             BasicLocationRegistry.setupLocationRegistryForTesting(manager);
             
             new BrooklynCampPlatformLauncherNoServer()
@@ -78,6 +79,12 @@ public abstract class BrooklynRestApiTest extends ResourceTest {
         addProvider(DefaultExceptionMapper.class);
         for (Object r: BrooklynRestApi.getBrooklynRestResources())
             addResource(r);
+    }
+
+    /** intended for overriding if you only want certain resources added, or additional ones added */
+    @Override
+    protected void setUpResources() throws Exception {
+        addResources();
     }
 
 }

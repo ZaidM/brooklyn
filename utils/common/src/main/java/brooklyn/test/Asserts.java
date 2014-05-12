@@ -7,12 +7,14 @@ import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import brooklyn.util.collections.MutableSet;
 import brooklyn.util.time.Duration;
 
 import com.google.common.annotations.Beta;
@@ -23,7 +25,15 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
+/**
+ * TODO should move this to new package brooklyn.util.assertions
+ * and TODO should add a repeating() method which returns an AssertingRepeater extending Repeater
+ * and:
+ * <li> adds support for requireAllIterationsTrue
+ * <li> convenience run methods equivalent to succeedsEventually and succeedsContinually
+ */
 @Beta
 public class Asserts {
 
@@ -58,13 +68,26 @@ public class Asserts {
     }
 
     public static void assertEqualsIgnoringOrder(Iterable<?> actual, Iterable<?> expected) {
-        String errMsg = "actual="+actual+"; expected="+expected;
-        assertTrue(Iterables.size(actual) == Iterables.size(expected), errMsg);
-        List<?> expectedMutable = Lists.newLinkedList(expected);
-        for (Object element : actual) {
-            boolean removed = expectedMutable.remove(element);
-            assertTrue(removed, errMsg);
-        }        
+        assertEqualsIgnoringOrder(actual, expected, false, null);
+    }
+
+    public static void assertEqualsIgnoringOrder(Iterable<?> actual, Iterable<?> expected, boolean logDuplicates, String errmsg) {
+        Set<?> actualSet = Sets.newLinkedHashSet(actual);
+        Set<?> expectedSet = Sets.newLinkedHashSet(expected);
+        Set<?> extras = Sets.difference(actualSet, expectedSet);
+        Set<?> missing = Sets.difference(expectedSet, actualSet);
+        List<Object> duplicates = Lists.newArrayList(actual);
+        for (Object a : actualSet) {
+            duplicates.remove(a);
+        }
+        String fullErrmsg = "extras="+extras+"; missing="+missing
+                + (logDuplicates ? "; duplicates="+MutableSet.copyOf(duplicates) : "")
+                +"; actualSize="+Iterables.size(actual)+"; expectedSize="+Iterables.size(expected)
+                +"; actual="+actual+"; expected="+expected+"; "+errmsg;
+        assertTrue(extras.isEmpty(), fullErrmsg);
+        assertTrue(missing.isEmpty(), fullErrmsg);
+        assertTrue(Iterables.size(actual) == Iterables.size(expected), fullErrmsg);
+        assertTrue(actualSet.equals(expectedSet), fullErrmsg); // should be covered by extras/missing/size test
     }
 
     // --- new routines
@@ -214,6 +237,7 @@ public class Asserts {
                         if (result instanceof BooleanWithMessage) 
                             log.warn("Test returned an instance of BooleanWithMessage but useGroovyTruth is not set! " +
                                      "The result of this probably isn't what you intended.");
+                        // FIXME surprising behaviour, "false" result here is acceptable
                         return result;
                     } else {
                         return result;

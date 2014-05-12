@@ -43,11 +43,14 @@ import brooklyn.launcher.BrooklynServerDetails;
 import brooklyn.launcher.FatalConfigurationRuntimeException;
 import brooklyn.launcher.PersistMode;
 import brooklyn.management.ManagementContext;
+import brooklyn.management.ha.HighAvailabilityMode;
 import brooklyn.util.ResourceUtils;
 import brooklyn.util.exceptions.Exceptions;
+import brooklyn.util.guava.Maybe;
+import brooklyn.util.javalang.Enums;
 import brooklyn.util.net.Networking;
-import brooklyn.util.text.Strings;
 import brooklyn.util.text.StringEscapes.JavaStringEscapes;
+import brooklyn.util.text.Strings;
 
 import com.google.common.annotations.Beta;
 import com.google.common.annotations.VisibleForTesting;
@@ -241,12 +244,18 @@ public class Main {
                 description = "After the application gets started, brooklyn will wait for a key press to stop it.")
         public boolean stopOnKeyPress = false;
 
+        final static String PERSIST_OPTION = "--persist";
+        final static String PERSIST_OPTION_DISABLED = "disabled";
+        final static String PERSIST_OPTION_AUTO = "auto";
+        final static String PERSIST_OPTION_REBIND = "rebind";
+        final static String PERSIST_OPTION_CLEAN = "clean";
+        
         // TODO currently defaults to disabled; want it to default to on, when we're ready
         // TODO how to force a line-split per option?!
         //      Looks like java.io.airlift.airline.UsagePrinter is splitting the description by word, and
         //      wrapping it automatically.
         //      See https://github.com/airlift/airline/issues/30
-        @Option(name = { "--persist" }, allowedValues = { "disabled", "auto", "rebind", "clean" },
+        @Option(name = { PERSIST_OPTION }, allowedValues = { PERSIST_OPTION_DISABLED, PERSIST_OPTION_AUTO, PERSIST_OPTION_REBIND, PERSIST_OPTION_CLEAN },
                 title = "persistance mode",
                 description =
                         "The persistence mode. Possible values are: \n"+
@@ -254,12 +263,32 @@ public class Main {
                         "auto: will rebind to any existing state, or start up fresh if no state; \n"+
                         "rebind: will rebind to the existing state, or fail if no state available; \n"+
                         "clean: will start up fresh (not using any existing state)")
-        public String persist = "disabled";
+        public String persist = PERSIST_OPTION_DISABLED;
 
         @Option(name = { "--persistenceDir" }, title = "persistence dir",
                 description = "the directory to read/write persisted state")
         public String persistenceDir;
+        
+        final static String HA_OPTION = "--highAvailability";
+        final static String HA_OPTION_DISABLED = "disabled";
+        final static String HA_OPTION_AUTO = "auto";
+        final static String HA_OPTION_MASTER = "master";
+        final static String HA_OPTION_STANDBY = "standby";
+        static { Enums.checkAllEnumeratedIgnoreCase(HighAvailabilityMode.class, HA_OPTION_AUTO, HA_OPTION_DISABLED, HA_OPTION_MASTER, HA_OPTION_STANDBY); }
+        
+        @Option(name = { HA_OPTION }, allowedValues = { HA_OPTION_DISABLED, HA_OPTION_AUTO, HA_OPTION_MASTER, HA_OPTION_STANDBY },
+                title = "high availability mode",
+                description =
+                        "The high availability mode. Possible values are: \n"+
+                        "disabled: management node works in isolation - will not cooperate with any other standby/master nodes in management plane; \n"+
+                        "auto: will look for other management nodes, and will allocate itself as standby or master based on other nodes' states; \n"+
+                        "master: will startup as master - if there is already a master then fails immediately; \n"+
+                        "standby: will start up as standby - if there is not already a master then fails immediately")
+        public String highAvailability = HA_OPTION_AUTO;
 
+        @VisibleForTesting
+        protected ManagementContext explicitManagementContext;
+        
         @Override
         public Void call() throws Exception {
             // Configure launcher
@@ -281,6 +310,7 @@ public class Main {
                 computeLocations();
                 
                 PersistMode persistMode = computePersistMode();
+                HighAvailabilityMode highAvailabilityMode = computeHighAvailabilityMode(persistMode);
                 
                 ResourceUtils utils = ResourceUtils.create(this);
                 ClassLoader parent = utils.getLoader();
@@ -299,6 +329,9 @@ public class Main {
                 if (persistMode != PersistMode.DISABLED && Strings.isNonBlank(persistenceDir)) {
                     launcher.persistenceDir(persistenceDir);
                 }
+                
+                launcher.highAvailabilityMode(highAvailabilityMode);
+
             } catch (FatalConfigurationRuntimeException e) {
                 throw e;
             } catch (Exception e) {
@@ -314,7 +347,7 @@ public class Main {
             } catch (Exception e) {
                 // Don't terminate the JVM; leave it as-is until someone explicitly stops it
                 Exceptions.propagateIfFatal(e);
-                log.error("Error launching brooklyn: "+e, e);
+                log.error("Error launching brooklyn: "+Exceptions.collapseText(e), e);
             }
             
             BrooklynServerDetails server = launcher.getServerDetails();
@@ -351,27 +384,50 @@ public class Main {
         }
 
         protected PersistMode computePersistMode() {
-            PersistMode persistMode;
-            if (Strings.isBlank(persist)) {
-                throw new FatalConfigurationRuntimeException("Persist mode must not be blank");
-            } else if (persist.equalsIgnoreCase("disabled")) {
-                persistMode = PersistMode.DISABLED;
-            } else if (persist.equalsIgnoreCase("auto")) {
-                persistMode = PersistMode.AUTO;
-            } else if (persist.equalsIgnoreCase("rebind")) {
-                persistMode = PersistMode.REBIND;
-            } else if (persist.equalsIgnoreCase("clean")) {
-                persistMode = PersistMode.CLEAN;
-            } else {
-                throw new FatalConfigurationRuntimeException("Illegal persist setting: "+persist);
+            Maybe<PersistMode> persistMode = Enums.valueOfIgnoreCase(PersistMode.class, persist);
+            if (!persistMode.isPresent()) {
+                if (Strings.isBlank(persist)) {
+                    throw new FatalConfigurationRuntimeException("Persist mode must not be blank");
+                } else {
+                    throw new FatalConfigurationRuntimeException("Illegal persist setting: "+persist);
+                }
             }
    
-            if (persistMode == PersistMode.DISABLED) {
+            if (persistMode.get() == PersistMode.DISABLED) {
                 if (Strings.isNonBlank(persistenceDir)) {
                     throw new FatalConfigurationRuntimeException("Cannot specify peristanceDir when persist is disabled");
                 }
             }
-            return persistMode;
+            return persistMode.get();
+        }
+
+        protected HighAvailabilityMode computeHighAvailabilityMode(PersistMode persistMode) {
+            Maybe<HighAvailabilityMode> highAvailabilityMode = Enums.valueOfIgnoreCase(HighAvailabilityMode.class, highAvailability);
+            if (!highAvailabilityMode.isPresent()) {
+                if (Strings.isBlank(highAvailability)) {
+                    throw new FatalConfigurationRuntimeException("High availability mode must not be blank");
+                } else {
+                    throw new FatalConfigurationRuntimeException("Illegal highAvailability setting: "+highAvailability);
+                }
+            }
+   
+            if (highAvailabilityMode.get() != HighAvailabilityMode.DISABLED) {
+                if (persistMode == PersistMode.DISABLED) {
+                    if (highAvailabilityMode.get() == HighAvailabilityMode.AUTO)
+                        return HighAvailabilityMode.DISABLED;
+                    throw new FatalConfigurationRuntimeException("Cannot specify highAvailability when persistence is disabled");
+                } else if (persistMode == PersistMode.CLEAN && highAvailabilityMode.get() == HighAvailabilityMode.STANDBY) {
+                    throw new FatalConfigurationRuntimeException("Cannot specify highAvailability STANDBY when persistence is CLEAN");
+                }
+            }
+            return highAvailabilityMode.get();
+        }
+        
+        @VisibleForTesting
+        /** forces the launcher to use the given management context, when programmatically invoked;
+         * mainly used when testing to inject a safe (and fast) mgmt context */
+        public void useManagementContext(ManagementContext mgmt) {
+            explicitManagementContext = mgmt;
         }
 
         protected BrooklynLauncher createLauncher() {
@@ -388,6 +444,9 @@ public class Main {
             if (Strings.isNonEmpty(bindAddress)) {
                 InetAddress ip = Networking.getInetAddressWithFixedName(bindAddress);
                 launcher.bindAddress(ip);
+            }
+            if (explicitManagementContext!=null) {
+                launcher.managementContext(explicitManagementContext);
             }
             return launcher;
         }
@@ -473,6 +532,7 @@ public class Main {
          * Helper method that gets an instance of a brooklyn {@link AbstractApplication} or an {@link ApplicationBuilder}.
          * Guaranteed to be non-null result of one of those types (throwing exception if app not appropriate).
          */
+        @SuppressWarnings("unchecked")
         protected Object loadApplicationFromClasspathOrParse(ResourceUtils utils, GroovyClassLoader loader, String app)
                 throws NoSuchMethodException, InvocationTargetException, IllegalAccessException, InstantiationException {
             
@@ -486,14 +546,17 @@ public class Main {
                 tempclazz = loader.parseClass(content);
             }
             final Class<?> clazz = tempclazz;
-
-            // Intantiate an app builder (wrapping app class in ApplicationBuilder, if necessary)
+            
+            // Instantiate an app builder (wrapping app class in ApplicationBuilder, if necessary)
             if (ApplicationBuilder.class.isAssignableFrom(clazz)) {
                 Constructor<?> constructor = clazz.getConstructor();
                 return (ApplicationBuilder) constructor.newInstance();
             } else if (StartableApplication.class.isAssignableFrom(clazz)) {
-                @SuppressWarnings("unchecked")
-                EntitySpec<StartableApplication> appSpec = EntitySpec.create(StartableApplication.class, (Class<? extends StartableApplication>) clazz);
+                EntitySpec<? extends StartableApplication> appSpec;
+                if (tempclazz.isInterface())
+                    appSpec = EntitySpec.create((Class<? extends StartableApplication>) clazz);
+                else
+                    appSpec = EntitySpec.create(StartableApplication.class, (Class<? extends StartableApplication>) clazz);
                 return new ApplicationBuilder(appSpec) {
                     @Override protected void doBuild() {
                     }};
@@ -506,13 +569,11 @@ public class Main {
             } else if (AbstractEntity.class.isAssignableFrom(clazz)) {
                 // TODO Should we really accept any entity type, and just wrap it in an app? That's not documented!
                 return new ApplicationBuilder() {
-                    @SuppressWarnings("unchecked")
                     @Override protected void doBuild() {
-                        addChild(EntitySpec.create(Entity.class).impl((Class<? extends AbstractEntity>)clazz));
+                        addChild(EntitySpec.create(Entity.class).impl((Class<? extends AbstractEntity>)clazz).additionalInterfaces(clazz.getInterfaces()));
                     }};
             } else if (Entity.class.isAssignableFrom(clazz)) {
                 return new ApplicationBuilder() {
-                    @SuppressWarnings("unchecked")
                     @Override protected void doBuild() {
                         addChild(EntitySpec.create((Class<? extends Entity>)clazz));
                     }};
@@ -548,7 +609,8 @@ public class Main {
                     .add("stopOnKeyPress", stopOnKeyPress)
                     .add("localBrooklynProperties", localBrooklynProperties)
                     .add("persist", persist)
-                    .add("persistenceDir", persistenceDir);
+                    .add("persistenceDir", persistenceDir)
+                    .add("highAvailability", highAvailability);
         }
     }
 

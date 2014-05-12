@@ -58,8 +58,8 @@ import brooklyn.util.config.ConfigBag;
 import brooklyn.util.exceptions.Exceptions;
 import brooklyn.util.flags.FlagUtils;
 import brooklyn.util.guava.Maybe;
-import brooklyn.util.internal.Repeater;
 import brooklyn.util.javalang.Threads;
+import brooklyn.util.repeat.Repeater;
 import brooklyn.util.stream.Streams;
 import brooklyn.util.task.DynamicTasks;
 import brooklyn.util.task.ParallelTask;
@@ -754,7 +754,10 @@ public class Entities {
     public static String getRequiredUrlConfig(Entity entity, ConfigKey<String> urlKey) {
         String url = entity.getConfig(urlKey);
         Preconditions.checkNotNull(url, "Key %s on %s should not be null", urlKey, entity);
-        return ResourceUtils.create(entity).checkUrlExists(url);
+        if (!ResourceUtils.create(entity).doesUrlExist(url)) {
+            throw new IllegalStateException(String.format("Key %s on %s contains unavailable URL %s", urlKey, entity, url));
+        }
+        return url;
     }
     /** as {@link #getRequiredUrlConfig(Entity, ConfigKey)} */
     public static String getRequiredUrlConfig(Entity entity, HasConfigKey<String> urlKey) {
@@ -801,11 +804,11 @@ public class Entities {
     }
 
     /** waits until {@link Startable#SERVICE_UP} returns true */
-    public static void waitForServiceUp(final Entity entity, long duration, TimeUnit units) {
+    public static void waitForServiceUp(final Entity entity, Duration timeout) {
         String description = "Waiting for SERVICE_UP on "+entity;
         Tasks.setBlockingDetails(description);
-        if (!Repeater.create(ImmutableMap.of("timeout", units.toMillis(duration), "description", description))
-                .rethrowException().repeat().every(1, TimeUnit.SECONDS)
+        if (!Repeater.create(description).limitTimeTo(timeout)
+                .rethrowException().every(Duration.ONE_SECOND)
                 .until(new Callable<Boolean>() {
                     public Boolean call() {
                         return entity.getAttribute(Startable.SERVICE_UP);
@@ -816,12 +819,12 @@ public class Entities {
         Tasks.resetBlockingDetails();
         log.debug("Detected SERVICE_UP for software {}", entity);
     }
-    public static void waitForServiceUp(final Entity entity, Duration duration) {
-        waitForServiceUp(entity, duration.toMilliseconds(), TimeUnit.MILLISECONDS);
+    public static void waitForServiceUp(final Entity entity, long duration, TimeUnit units) {
+        waitForServiceUp(entity, Duration.of(duration, units));
     }
     public static void waitForServiceUp(final Entity entity) {
-        Integer timeout = entity.getConfig(BrooklynConfigKeys.START_TIMEOUT);
-        waitForServiceUp(entity, Duration.seconds(timeout));
+        Duration timeout = entity.getConfig(BrooklynConfigKeys.START_TIMEOUT);
+        waitForServiceUp(entity, timeout);
     }
 
 }

@@ -99,7 +99,6 @@ import brooklyn.util.exceptions.CompoundRuntimeException;
 import brooklyn.util.exceptions.Exceptions;
 import brooklyn.util.flags.SetFromFlag;
 import brooklyn.util.flags.TypeCoercions;
-import brooklyn.util.internal.Repeater;
 import brooklyn.util.internal.ssh.ShellTool;
 import brooklyn.util.internal.ssh.SshTool;
 import brooklyn.util.javalang.Reflections;
@@ -107,6 +106,7 @@ import brooklyn.util.net.Cidr;
 import brooklyn.util.net.Networking;
 import brooklyn.util.net.Protocol;
 import brooklyn.util.os.Os;
+import brooklyn.util.repeat.Repeater;
 import brooklyn.util.ssh.BashCommands;
 import brooklyn.util.ssh.IptablesCommands;
 import brooklyn.util.ssh.IptablesCommands.Chain;
@@ -917,7 +917,9 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
                     }})
             .put(USER_METADATA_MAP, new CustomizeTemplateOptions() {
                     public void apply(TemplateOptions t, ConfigBag props, Object v) {
-                        t.userMetadata(toMapStringString(v));
+                        if (v != null) {
+                            t.userMetadata(toMapStringString(v));
+                        }
                     }})
             .put(EXTRA_PUBLIC_KEY_DATA_TO_AUTH, new CustomizeTemplateOptions() {
                     public void apply(TemplateOptions t, ConfigBag props, Object v) {
@@ -1733,7 +1735,6 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
         Stopwatch stopwatch = Stopwatch.createStarted();
         
         boolean reachable = new Repeater()
-            .repeat()
             .every(1,SECONDS)
             .until(checker)
             .limitTimeTo(delayMs, MILLISECONDS)
@@ -2007,7 +2008,8 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
         } else if (v instanceof CharSequence) {
             return KeyValueParser.parseMap(v.toString());
         } else {
-            throw new IllegalArgumentException("Invalid type for Map<String,String>: "+v+" of type "+v.getClass());
+            throw new IllegalArgumentException("Invalid type for Map<String,String>: " + v +
+                    (v != null ? " of type "+v.getClass() : ""));
         }
     }
     

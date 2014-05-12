@@ -57,7 +57,10 @@ import com.google.common.util.concurrent.Callables;
  *     .run()
  * }
  * </pre>
+ * 
+ * @deprecated since 0.7.0, use {@link brooklyn.util.repeat.Repeater} instead
  */
+@Deprecated
 public class Repeater {
     
     // TODO Was converted to Java, from groovy. Needs thorough review and improvements
