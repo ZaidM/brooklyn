@@ -33,15 +33,13 @@ public interface CouchbaseSyncGateway extends SoftwareProcess {
     @SetFromFlag("couchbaseServerBucket")
     ConfigKey<String> COUCHBASE_SERVER_BUCKET = ConfigKeys.newStringConfigKey("couchbaseSyncGateway.serverBucket", "Name of the Couchbase bucket to use", "sync_gateway");
 
-    @SetFromFlag("serverWebUrl")
-    ConfigKey<String> COUCHBASE_SERVER_URL = ConfigKeys.newStringConfigKey("couchbaseSyncGateway.serverUrl", "Couchbase Server Url");
+    @SetFromFlag("couchbaseServerUrl")
+    ConfigKey<String> COUCHBASE_SERVER_URL = ConfigKeys.newStringConfigKey("couchbaseSyncGateway.couchbaseServerUrl", "Couchbase Server Admin Url to connect the gateway to");
 
     AttributeSensor<String> COUCHBASE_SERVER_WEB_URL = Sensors.newStringSensor("couchbaseSyncGateway.serverWebUrl", "The Url and web port of the couchbase server to connect to");
 
-//    @SetFromFlag("couchbaseNode")
-//    AttributeSensor<Entity> COUCHBASE_NODE = new BasicAttributeSensorAndConfigKey<Entity>(Entity.class, "couchbaseSyncGateway.couchbaseNode", "The node in the cluster to connect to ");
 
     PortAttributeSensorAndConfigKey SYNC_REST_API_PORT = new PortAttributeSensorAndConfigKey("couchbaseSyncGateway.syncRestPort", "Port the Sync REST API listens on", "4984");
-    PortAttributeSensorAndConfigKey ADMIN_REST_API_PORT = new PortAttributeSensorAndConfigKey("couchbaseSyncGateway.admingRestPort", "Port the Admin REST API listens on", "4985");
+    PortAttributeSensorAndConfigKey ADMIN_REST_API_PORT = new PortAttributeSensorAndConfigKey("couchbaseSyncGateway.adminRestPort", "Port the Admin REST API listens on", "4985");
 
 }
