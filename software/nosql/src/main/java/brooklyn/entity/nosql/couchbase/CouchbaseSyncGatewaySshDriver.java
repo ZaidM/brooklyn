@@ -55,15 +55,19 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
 
     @Override
     public void launch() {
+        Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_NODE);
+        Entities.waitForServiceUp(cbNode, Duration.seconds(3 * 60));
+
+        String hostname = cbNode.getAttribute(CouchbaseNode.HOSTNAME);
+        String webPort = cbNode.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_PORT).toString();
+        String username = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME);
+        String password = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD);
+
         ///opt/couchbase-sync-gateway/bin/sync_gateway
-
-        Entity couchbaseNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_NODE);
-        Entities.waitForServiceUp(couchbaseNode, Duration.seconds(3 * 60));
-
-        String serverWebAdminUrl = couchbaseNode.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_URL);
-        entity.setAttribute(CouchbaseSyncGateway.COUCHBASE_SERVER_WEB_URL, serverWebAdminUrl);
-        newScript(LAUNCHING).body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway -url %s", serverWebAdminUrl)).execute();
-
+        String serverWebAdminUrl = format("http://%s:%s@%s:%s", username, password, hostname, webPort);
+        newScript(LAUNCHING)
+                .body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway -url %s", serverWebAdminUrl))
+                .execute();
     }
 
     private List<String> installLinux(List<String> urls, String saveAs) {
