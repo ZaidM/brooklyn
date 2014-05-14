@@ -36,6 +36,12 @@ public interface CouchbaseSyncGateway extends SoftwareProcess {
     @SetFromFlag("couchbaseServerUrl")
     ConfigKey<String> COUCHBASE_SERVER_URL = ConfigKeys.newStringConfigKey("couchbaseSyncGateway.couchbaseServerUrl", "Couchbase Server Admin Url to connect the gateway to");
 
+    @SetFromFlag("pretty")
+    ConfigKey<Boolean> PRETTY = ConfigKeys.newBooleanConfigKey("couchbaseSyncGateway.pretty", "Pretty-print JSON responses. This is useful for debugging, but reduces performance.", false);
+
+    @SetFromFlag("verbose")
+    ConfigKey<Boolean> VERBOSE = ConfigKeys.newBooleanConfigKey("couchbaseSyncGateway.verbose", "Logs more information about requests.", false);
+
     AttributeSensor<String> COUCHBASE_SERVER_WEB_URL = Sensors.newStringSensor("couchbaseSyncGateway.serverWebUrl", "The Url and web port of the couchbase server to connect to");
 
 

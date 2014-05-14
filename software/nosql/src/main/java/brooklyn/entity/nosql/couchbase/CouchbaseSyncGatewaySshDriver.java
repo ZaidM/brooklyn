@@ -63,10 +63,26 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
         String username = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME);
         String password = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD);
 
+        String bucketName = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER_BUCKET);
+        String pool = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER_POOL);
+        String pretty = entity.getConfig(CouchbaseSyncGateway.PRETTY) ? "-pretty" : "";
+        String verbose = entity.getConfig(CouchbaseSyncGateway.VERBOSE) ? "-verbose" : "";
+
+        String adminRestApiPort = entity.getConfig(CouchbaseSyncGateway.ADMIN_REST_API_PORT).iterator().next().toString();
+        String syncRestApiPort = entity.getConfig(CouchbaseSyncGateway.SYNC_REST_API_PORT).iterator().next().toString();
+
+      /*
+      3 -dbname	bucket name	 Name of the database to serve via the Sync REST API
+      6 -log
+      7 -personaOrigin
+      */
         ///opt/couchbase-sync-gateway/bin/sync_gateway
         String serverWebAdminUrl = format("http://%s:%s@%s:%s", username, password, hostname, webPort);
+        String options = format("-url %s -bucket %s -adminInterface 127.0.0.1:%s -interface %s -pool %s %s %s",
+                serverWebAdminUrl, bucketName, adminRestApiPort, syncRestApiPort, pool, pretty, verbose);
+
         newScript(LAUNCHING)
-                .body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway -url %s", serverWebAdminUrl))
+                .body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway %s", options))
                 .execute();
     }
 
