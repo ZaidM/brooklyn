@@ -5,7 +5,9 @@ import static java.lang.String.format;
 
 import java.util.List;
 
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
 import brooklyn.entity.Entity;
 import brooklyn.entity.basic.AbstractSoftwareProcessSshDriver;
@@ -41,6 +43,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
 
         OsDetails osDetails = getMachine().getMachineDetails().getOsDetails();
 
+        log.info("Installing couchbase-sync-gateway version: {}", getVersion());
         if (osDetails.isLinux()) {
             List<String> commands = installLinux(urls, saveAs);
             newScript(INSTALLING)
@@ -55,7 +58,11 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
 
     @Override
     public void launch() {
-        Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_NODE);
+        Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER);
+        if (cbNode instanceof CouchbaseCluster) {
+            cbNode = Iterables.find(cbNode.getAttribute(CouchbaseCluster.GROUP_MEMBERS), Predicates.instanceOf(CouchbaseNode.class));
+        }
+
         Entities.waitForServiceUp(cbNode, Duration.seconds(3 * 60));
 
         String hostname = cbNode.getAttribute(CouchbaseNode.HOSTNAME);
@@ -71,12 +78,6 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
         String adminRestApiPort = entity.getConfig(CouchbaseSyncGateway.ADMIN_REST_API_PORT).iterator().next().toString();
         String syncRestApiPort = entity.getConfig(CouchbaseSyncGateway.SYNC_REST_API_PORT).iterator().next().toString();
 
-      /*
-      3 -dbname	bucket name	 Name of the database to serve via the Sync REST API
-      6 -log
-      7 -personaOrigin
-      */
-        ///opt/couchbase-sync-gateway/bin/sync_gateway
         String serverWebAdminUrl = format("http://%s:%s@%s:%s", username, password, hostname, webPort);
         String options = format("-url %s -bucket %s -adminInterface 127.0.0.1:%s -interface %s -pool %s %s %s",
                 serverWebAdminUrl, bucketName, adminRestApiPort, syncRestApiPort, pool, pretty, verbose);
@@ -87,8 +88,6 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
     }
 
     private List<String> installLinux(List<String> urls, String saveAs) {
-
-        log.info("Installing from package manager couchbase-sync-gateway version: {}", getVersion());
 
         String apt = chainGroup(
                 "which apt-get",
