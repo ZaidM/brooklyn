@@ -22,11 +22,9 @@ public interface CouchbaseSyncGateway extends SoftwareProcess {
     BasicAttributeSensorAndConfigKey<String> DOWNLOAD_URL = new BasicAttributeSensorAndConfigKey<String>(
             SoftwareProcess.DOWNLOAD_URL, "http://packages.couchbase.com/releases/couchbase-sync-gateway/1.0-beta/couchbase-sync-gateway-community_${version}_${driver.osTag}");
 
-    @SetFromFlag("couchbaseNode")
-    ConfigKey<Entity> COUCHBASE_NODE = ConfigKeys.newConfigKey(Entity.class, "couchbaseSyncGateway.couchbaseNode", "Couchbase server node the sync gateway connects to");
+    @SetFromFlag("couchbaseServer")
+    ConfigKey<Entity> COUCHBASE_SERVER = ConfigKeys.newConfigKey(Entity.class, "couchbaseSyncGateway.couchbaseNode", "Couchbase server node or cluster the sync gateway connects to");
 
-    @SetFromFlag("couchbaseCluster")
-    ConfigKey<CouchbaseCluster> COUCHBASE_CLUSTER = ConfigKeys.newConfigKey(CouchbaseCluster.class, "couchbaseSyncGateway.couchbaseCluster", "Couchbase cluster the sync gateway connects to");
 
     @SetFromFlag("serverPool")
     ConfigKey<String> COUCHBASE_SERVER_POOL = ConfigKeys.newStringConfigKey("couchbaseSyncGateway.serverPool", "Couchbase Server pool name in which to find buckets", "default");
