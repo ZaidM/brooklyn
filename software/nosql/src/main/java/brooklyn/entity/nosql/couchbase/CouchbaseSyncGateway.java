@@ -41,7 +41,7 @@ public interface CouchbaseSyncGateway extends SoftwareProcess {
     ConfigKey<Boolean> VERBOSE = ConfigKeys.newBooleanConfigKey("couchbaseSyncGateway.verbose", "Logs more information about requests.", false);
 
     AttributeSensor<String> COUCHBASE_SERVER_WEB_URL = Sensors.newStringSensor("couchbaseSyncGateway.serverWebUrl", "The Url and web port of the couchbase server to connect to");
-
+    AttributeSensor<String> MANAGEMENT_URL = Sensors.newStringSensor("coucbaseSyncGateway.managementUrl","Management URL for Couchbase Sycn Gateway");
 
     PortAttributeSensorAndConfigKey SYNC_REST_API_PORT = new PortAttributeSensorAndConfigKey("couchbaseSyncGateway.syncRestPort", "Port the Sync REST API listens on", "4984");
     PortAttributeSensorAndConfigKey ADMIN_REST_API_PORT = new PortAttributeSensorAndConfigKey("couchbaseSyncGateway.adminRestPort", "Port the Admin REST API listens on", "4985");

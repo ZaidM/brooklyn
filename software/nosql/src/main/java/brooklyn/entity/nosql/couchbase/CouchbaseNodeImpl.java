@@ -45,7 +45,7 @@ public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseN
     @Override
     public void init() {
         super.init();
-        
+
         subscribe(this, Attributes.SERVICE_UP, new SensorEventListener<Boolean>() {
             @Override
             public void onEvent(SensorEvent<Boolean> booleanSensorEvent) {
@@ -86,6 +86,11 @@ public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseN
     @Override
     public void rebalance() {
         getDriver().rebalance();
+    }
+
+    @Override
+    public void bucketCreate(String bucketName, String bucketType, Integer bucketPort, Integer bucketRamSize, Integer bucketReplica) {
+        getDriver().bucketCreate(bucketName, bucketType, bucketPort, bucketRamSize, bucketReplica);
     }
 
 
