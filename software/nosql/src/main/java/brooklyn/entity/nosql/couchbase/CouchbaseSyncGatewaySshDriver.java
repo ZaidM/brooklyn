@@ -5,12 +5,16 @@ import static java.lang.String.format;
 
 import java.util.List;
 
-import com.google.common.base.Predicates;
+import javax.annotation.Nullable;
+
+import com.google.common.base.Optional;
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
 import brooklyn.entity.Entity;
 import brooklyn.entity.basic.AbstractSoftwareProcessSshDriver;
+import brooklyn.entity.basic.Attributes;
 import brooklyn.entity.basic.Entities;
 import brooklyn.entity.basic.EntityLocal;
 import brooklyn.entity.drivers.downloads.DownloadResolver;
@@ -26,7 +30,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
 
     @Override
     public boolean isRunning() {
-        return true;
+        return Boolean.TRUE.equals(entity.getAttribute(Attributes.SERVICE_UP));
     }
 
     @Override
@@ -59,14 +63,31 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
     @Override
     public void launch() {
         Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER);
+        Entities.waitForServiceUp(cbNode, Duration.seconds(5 * 60));
+
+
         if (cbNode instanceof CouchbaseCluster) {
-            cbNode = Iterables.find(cbNode.getAttribute(CouchbaseCluster.GROUP_MEMBERS), Predicates.instanceOf(CouchbaseNode.class));
+            Optional<Entity> cbClusterNode = Iterables.tryFind(cbNode.getAttribute(CouchbaseCluster.GROUP_MEMBERS), new Predicate<Entity>() {
+
+                @Override
+                public boolean apply(@Nullable Entity entity) {
+                    if (entity instanceof CouchbaseNode && Boolean.TRUE.equals(entity.getAttribute(CouchbaseNode.IS_IN_CLUSTER))) {
+                        return true;
+                    }
+                    return false;
+                }
+            });
+            if (cbClusterNode.isPresent()) {
+                cbNode = cbClusterNode.get();
+            } else {
+                throw new IllegalArgumentException(format("The cluster %s does not contain any suitable Couchbase nodes to connect to..", cbNode.getId()));
+            }
+
         }
-
-        Entities.waitForServiceUp(cbNode, Duration.seconds(3 * 60));
-
         String hostname = cbNode.getAttribute(CouchbaseNode.HOSTNAME);
         String webPort = cbNode.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_PORT).toString();
+
+
         String username = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME);
         String password = cbNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD);
 
@@ -79,7 +100,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
         String syncRestApiPort = entity.getConfig(CouchbaseSyncGateway.SYNC_REST_API_PORT).iterator().next().toString();
 
         String serverWebAdminUrl = format("http://%s:%s@%s:%s", username, password, hostname, webPort);
-        String options = format("-url %s -bucket %s -adminInterface 127.0.0.1:%s -interface %s -pool %s %s %s",
+        String options = format("-url %s -bucket %s -adminInterface 0.0.0.0:%s -interface 0.0.0.0:%s -pool %s %s %s",
                 serverWebAdminUrl, bucketName, adminRestApiPort, syncRestApiPort, pool, pretty, verbose);
 
         newScript(LAUNCHING)
