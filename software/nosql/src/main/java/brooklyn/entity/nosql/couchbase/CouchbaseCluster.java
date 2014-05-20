@@ -57,4 +57,6 @@ public interface CouchbaseCluster extends DynamicCluster {
     ConfigKey<List<Map<String, Object>>> CREATE_BUCKETS = ConfigKeys.newConfigKey(new TypeToken<List<Map<String, Object>>>() {
     }, "couchbase.cluster.createBuckets", "a list of all dedicated port buckets to be created on the couchbase cluster");
 
+
+
 }

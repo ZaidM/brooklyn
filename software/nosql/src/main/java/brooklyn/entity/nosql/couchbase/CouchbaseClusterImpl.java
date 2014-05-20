@@ -68,6 +68,11 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
                 Entities.invokeEffector(this, getPrimaryNode(), CouchbaseNode.REBALANCE);
 
                 setAttribute(IS_CLUSTER_INITIALIZED, true);
+
+                //wait for rebalance then add buckets
+                if (Optional.fromNullable(CREATE_BUCKETS).isPresent()) {
+                    createBuckets(getPrimaryNode());
+                }
             } else {
                 //TODO: add a repeater to wait for a quorum of servers to be up.
                 //retry waiting for service up?
@@ -77,10 +82,6 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
             setAttribute(SERVICE_STATE, Lifecycle.ON_FIRE);
         }
 
-        //check if any buckets need to be created
-        if (Optional.fromNullable(CREATE_BUCKETS).isPresent()) {
-            createBuckets(getPrimaryNode());
-        }
 
     }
 
@@ -262,7 +263,7 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
     }
 
     public void createBuckets(Entity primaryNode) {
-        //FIXME: check if server is rebalancing, make sure bucket ramsize does not exceed server ramsize
+        //FIXME: multiple buckets require synchronization/wait time (checks for port conflicts and exceeding ram size)
         //TODO: check for multiple bucket conflicts with port
         List<Map<String, Object>> bucketsToCreate = getConfig(CREATE_BUCKETS);
 
@@ -273,6 +274,8 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
             Integer bucketRamSize = bucketMap.containsKey("bucket-ramsize") ? (Integer) bucketMap.get("bucket-ramsize") : 200;
             Integer bucketReplica = bucketMap.containsKey("bucket-replica") ? (Integer) bucketMap.get("bucket-replica") : 1;
 
+            log.info("adding bucket: {} to primary node: {}", bucketName, primaryNode.getId());
+            //wait for buckets to be added.
             Entities.invokeEffectorWithArgs(this, primaryNode, CouchbaseNode.BUCKET_CREATE, bucketName, bucketType, bucketPort, bucketRamSize, bucketReplica);
         }
 
