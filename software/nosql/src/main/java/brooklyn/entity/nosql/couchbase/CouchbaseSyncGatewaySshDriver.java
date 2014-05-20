@@ -63,7 +63,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
     @Override
     public void launch() {
         Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER);
-        Entities.waitForServiceUp(cbNode, Duration.seconds(5 * 60));
+        Entities.waitForServiceUp(cbNode,Duration.FIVE_MINUTES);
 
 
         if (cbNode instanceof CouchbaseCluster) {
