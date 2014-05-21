@@ -8,6 +8,8 @@ import com.google.common.reflect.TypeToken;
 
 import brooklyn.config.ConfigKey;
 import brooklyn.entity.Entity;
+import brooklyn.entity.annotation.Effector;
+import brooklyn.entity.annotation.EffectorParam;
 import brooklyn.entity.basic.ConfigKeys;
 import brooklyn.entity.group.DynamicCluster;
 import brooklyn.entity.proxying.ImplementedBy;
@@ -33,6 +35,11 @@ public interface CouchbaseCluster extends DynamicCluster {
 
     AttributeSensor<Boolean> IS_CLUSTER_INITIALIZED = Sensors.newBooleanSensor("couchbase.cluster.isClusterInitialized", "flag to emit if the couchbase cluster was intialized");
 
+    AttributeSensor<Boolean> BUCKET_CREATION_IN_PROGRESS = Sensors.newBooleanSensor("couchbase.cluster.bucketCreationInProgress", "Indicates that a bucket is currently being created, and" +
+            "further bucket creation should be deferred");
+
+    AttributeSensor<Boolean> BUCKET_CREATED = Sensors.newBooleanSensor("couchbase.cluster.bucketCreated", "Indicates that a bucket has been created");
+
     @SetFromFlag("intialQuorumSize")
     ConfigKey<Integer> INITIAL_QUORUM_SIZE = ConfigKeys.newIntegerConfigKey("couchbase.cluster.intialQuorumSize", "Initial cluster quorum size - number of initial nodes that must have been successfully started to report success (if < 0, then use value of INITIAL_SIZE)",
             -1);
@@ -55,8 +62,13 @@ public interface CouchbaseCluster extends DynamicCluster {
      */
     @SetFromFlag("createBuckets")
     ConfigKey<List<Map<String, Object>>> CREATE_BUCKETS = ConfigKeys.newConfigKey(new TypeToken<List<Map<String, Object>>>() {
-    }, "couchbase.cluster.createBuckets", "a list of all dedicated port buckets to be created on the couchbase cluster");
+    },
+            "couchbase.cluster.createBuckets", "a list of all dedicated port buckets to be created on the couchbase cluster");
 
 
+    @Effector(description = "create a new bucket")
+    public void bucketCreate(@EffectorParam(name = "bucket") String bucketName, @EffectorParam(name = "bucket-type") String bucketType,
+                             @EffectorParam(name = "bucket-port") Integer bucketPort, @EffectorParam(name = "bucket-ramsize") Integer bucketRamSize,
+                             @EffectorParam(name = "bucket-replica") Integer bucketReplica);
 
 }
