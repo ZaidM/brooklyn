@@ -1,11 +1,11 @@
 package brooklyn.location.jclouds;
 
-import java.io.File;
 import java.util.Collection;
 import java.util.concurrent.Semaphore;
 
 import org.jclouds.Constants;
 import org.jclouds.compute.domain.Image;
+import org.jclouds.compute.domain.OsFamily;
 import org.jclouds.compute.domain.TemplateBuilder;
 import org.jclouds.domain.LoginCredentials;
 
@@ -118,6 +118,7 @@ public interface JcloudsLocationConfig extends CloudLocationConfig {
             "Tags to be applied when creating a VM, on supported clouds " +
             "(either a single tag as a String, or an Iterable<String> or String[];" +
             "note this is not key-value pairs (e.g. what AWS calls 'tags'), for that see userMetadata)", null);
+
     @Deprecated /** @deprecated since 0.7.0 use #STRING_TAGS */
     public static final ConfigKey<Object> TAGS = STRING_TAGS;
 
@@ -186,6 +187,11 @@ public interface JcloudsLocationConfig extends CloudLocationConfig {
         new TypeToken<Function<Iterable<? extends Image>,Image>>() {},
         "imageChooser", "An image chooser function to control which images are preferred", 
         new BrooklynImageChooser().chooser());
+
+    public static final ConfigKey<OsFamily> OS_FAMILY = ConfigKeys.newConfigKey(OsFamily.class, "osFamily", 
+        "OS family, e.g. CentOS, Debian, RHEL, Ubuntu");
+    public static final ConfigKey<String> OS_VERSION_REGEX = ConfigKeys.newStringConfigKey("osVersionRegex", 
+        "Regular expression for the OS version to load");
 
     // TODO
     

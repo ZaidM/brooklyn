@@ -3,6 +3,7 @@ package brooklyn.entity.group;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -16,8 +17,10 @@ import brooklyn.entity.basic.BasicGroup;
 import brooklyn.entity.basic.Entities;
 import brooklyn.entity.proxying.EntitySpec;
 import brooklyn.entity.trait.Startable;
+import brooklyn.event.Sensor;
 import brooklyn.location.basic.SimulatedLocation;
 import brooklyn.management.EntityManager;
+import brooklyn.policy.PolicySpec;
 import brooklyn.test.Asserts;
 import brooklyn.test.entity.TestApplication;
 import brooklyn.test.entity.TestEntity;
@@ -46,9 +49,8 @@ public class MembershipTrackingPolicyTest {
         
         group = app.createAndManageChild(EntitySpec.create(BasicGroup.class)
                 .configure("childrenAsMembers", true));
-        policy = new RecordingMembershipTrackingPolicy(MutableMap.of("group", group));
-        group.addPolicy(policy);
-        policy.setGroup(group);
+        policy = app.addPolicy(PolicySpec.create(RecordingMembershipTrackingPolicy.class)
+                .configure("group", group));
 
         app.start(ImmutableList.of(loc));
     }
@@ -124,13 +126,67 @@ public class MembershipTrackingPolicyTest {
     public void testNotifiedOfExtraTrackedSensors() throws Exception {
         TestEntity e1 = createAndManageChildOf(group);
 
-        RecordingMembershipTrackingPolicy policy2 = new RecordingMembershipTrackingPolicy(MutableMap.of("group", group, "sensorsToTrack", ImmutableSet.of(TestEntity.NAME)));
-        group.addPolicy(policy2);
-        policy2.setGroup(group);
+        RecordingMembershipTrackingPolicy policy2 = app.addPolicy(PolicySpec.create(RecordingMembershipTrackingPolicy.class)
+                .configure("group", group)
+                .configure("sensorsToTrack", ImmutableSet.of(TestEntity.NAME)));
+
 
         e1.setAttribute(TestEntity.NAME, "myname");
 
         assertRecordsEventually(policy2, Record.newAdded(e1), Record.newChanged(e1));
+    }
+    
+    @Test
+    public void testDeprecatedSetGroupWorks() throws Exception {
+        RecordingMembershipTrackingPolicy policy2 = new RecordingMembershipTrackingPolicy(MutableMap.of("sensorsToTrack", ImmutableSet.of(TestEntity.NAME)));
+        group.addPolicy(policy2);
+        policy2.setGroup(group);
+
+        TestEntity e1 = createAndManageChildOf(group);
+        e1.setAttribute(TestEntity.NAME, "myname");
+
+        assertRecordsEventually(policy2, Record.newAdded(e1), Record.newChanged(e1));
+    }
+    
+    @Test
+    public void testNotNotifiedOfExtraTrackedSensorsIfNonDuplicate() throws Exception {
+        TestEntity e1 = createAndManageChildOf(group);
+        
+        RecordingMembershipTrackingPolicy nonDuplicateTrackingPolicy = app.addPolicy(PolicySpec.create(RecordingMembershipTrackingPolicy.class)
+                .configure(AbstractMembershipTrackingPolicy.SENSORS_TO_TRACK, ImmutableSet.<Sensor<?>>of(TestEntity.NAME))
+                .configure(AbstractMembershipTrackingPolicy.NOTIFY_ON_DUPLICATES, false)
+                .configure(AbstractMembershipTrackingPolicy.GROUP, group));
+
+        e1.setAttribute(TestEntity.NAME, "myname");
+
+        assertRecordsEventually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1));
+        
+        e1.setAttribute(TestEntity.NAME, "myname");
+        
+        assertRecordsContinually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1));
+        
+        e1.setAttribute(TestEntity.NAME, "mynewname");
+        
+        assertRecordsEventually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1), Record.newChanged(e1));
+    }
+
+    // NOTIFY_ON_DUPLICATES==true is default
+    @Test
+    public void testNotifiedOfExtraTrackedSensorsIfDuplicate() throws Exception {
+        TestEntity e1 = createAndManageChildOf(group);
+        
+        RecordingMembershipTrackingPolicy nonDuplicateTrackingPolicy = app.addPolicy(PolicySpec.create(RecordingMembershipTrackingPolicy.class)
+                .configure(AbstractMembershipTrackingPolicy.SENSORS_TO_TRACK, ImmutableSet.<Sensor<?>>of(TestEntity.NAME))
+                .configure(AbstractMembershipTrackingPolicy.GROUP, group));
+
+        e1.setAttribute(TestEntity.NAME, "myname");
+        assertRecordsEventually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1));
+        
+        e1.setAttribute(TestEntity.NAME, "myname");
+        assertRecordsEventually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1), Record.newChanged(e1));
+        
+        e1.setAttribute(TestEntity.NAME, "mynewname");
+        assertRecordsEventually(nonDuplicateTrackingPolicy, Record.newAdded(e1), Record.newChanged(e1), Record.newChanged(e1), Record.newChanged(e1));
     }
 
     private void assertRecordsEventually(final Record... expected) {
@@ -148,20 +204,29 @@ public class MembershipTrackingPolicyTest {
                 for (List<Record> validExpected : validExpecteds) {
                     if (policy.records.equals(validExpected)) return;
                 }
-                fail("actual="+policy.records+"; valid: "+validExpecteds);
+                fail("actual="+policy.records+"; valid: "+Arrays.toString(validExpecteds));
             }});
     }
 
     private void assertRecordsContinually(final Record... expected) {
+        assertRecordsContinually(policy, expected);
+    }
+    
+    private void assertRecordsContinually(final RecordingMembershipTrackingPolicy policy, final Record... expected) {
         Asserts.succeedsContinually(ImmutableMap.of("timeout", 100), new Runnable() {
             public void run() {
                 assertEquals(policy.records, ImmutableList.copyOf(expected), "actual="+policy.records);
             }});
     }
 
-    static class RecordingMembershipTrackingPolicy extends AbstractMembershipTrackingPolicy {
+    // Needs to be public when instantiated from a spec (i.e. by InternalPolicyFactory)
+    public static class RecordingMembershipTrackingPolicy extends AbstractMembershipTrackingPolicy {
         final List<Record> records = new CopyOnWriteArrayList<Record>();
 
+        public RecordingMembershipTrackingPolicy() {
+            super();
+        }
+        
         public RecordingMembershipTrackingPolicy(MutableMap<String, ?> flags) {
             super(flags);
         }

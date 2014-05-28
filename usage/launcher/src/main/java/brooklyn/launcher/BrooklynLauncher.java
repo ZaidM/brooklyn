@@ -18,7 +18,6 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
@@ -31,6 +30,7 @@ import brooklyn.config.BrooklynServiceAttributes;
 import brooklyn.config.ConfigKey;
 import brooklyn.entity.Application;
 import brooklyn.entity.basic.ApplicationBuilder;
+import brooklyn.entity.basic.BrooklynShutdownHooks;
 import brooklyn.entity.basic.Entities;
 import brooklyn.entity.basic.StartableApplication;
 import brooklyn.entity.proxying.EntitySpec;
@@ -378,6 +378,10 @@ public class BrooklynLauncher {
                 managementContext = new LocalManagementContext(brooklynProperties, brooklynAdditionalProperties);
             }
             brooklynProperties = ((ManagementContextInternal)managementContext).getBrooklynProperties();
+            
+            // We created the management context, so we are responsible for terminating it
+            BrooklynShutdownHooks.invokeTerminateOnShutdown(managementContext);
+            
         } else if (brooklynProperties == null) {
             brooklynProperties = ((ManagementContextInternal)managementContext).getBrooklynProperties();
             brooklynProperties.addFromMap(brooklynAdditionalProperties);
@@ -642,7 +646,7 @@ public class BrooklynLauncher {
         List<Throwable> appExceptions = Lists.newArrayList();
         for (Application app : apps) {
             if (app instanceof Startable) {
-                if (shutdownOnExit) Entities.invokeStopOnShutdown(app);
+                if (shutdownOnExit) BrooklynShutdownHooks.invokeStopOnShutdown(app);
                 try {
                     LOG.info("Starting brooklyn application {} in location{} {}", new Object[] { app, locations.size()!=1?"s":"", locations });
                     ((Startable)app).start(locations);
@@ -683,7 +687,7 @@ public class BrooklynLauncher {
         if (persistMode != PersistMode.DISABLED) {
             try {
                 Stopwatch stopwatch = Stopwatch.createStarted();
-                managementContext.getRebindManager().waitForPendingComplete(10, TimeUnit.SECONDS);
+                managementContext.getRebindManager().waitForPendingComplete(Duration.TEN_SECONDS);
                 LOG.info("Finished waiting for persist; took "+Time.makeTimeStringRounded(stopwatch));
             } catch (RuntimeInterruptedException e) {
                 Thread.currentThread().interrupt(); // keep going with shutdown

@@ -2,7 +2,6 @@ package brooklyn.entity.rebind.persister;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
@@ -12,20 +11,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathExpression;
-import javax.xml.xpath.XPathExpressionException;
-import javax.xml.xpath.XPathFactory;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.w3c.dom.Document;
-import org.xml.sax.SAXException;
 
+import brooklyn.entity.rebind.RebindExceptionHandler;
 import brooklyn.entity.rebind.dto.BrooklynMementoImpl;
 import brooklyn.entity.rebind.dto.BrooklynMementoManifestImpl;
 import brooklyn.mementos.BrooklynMemento;
@@ -111,7 +100,7 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
     }
     
     @Override
-    public BrooklynMementoManifest loadMementoManifest() throws IOException {
+    public BrooklynMementoManifest loadMementoManifest(RebindExceptionHandler exceptionHandler) throws IOException {
         if (!running) {
             throw new IllegalStateException("Persister not running; cannot load memento manifest from "+dir);
         }
@@ -123,10 +112,18 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
                 return !file.getName().endsWith(".tmp");
             }
         };
-        File[] entityFiles = entitiesDir.listFiles(fileFilter);
-        File[] locationFiles = locationsDir.listFiles(fileFilter);
-        File[] policyFiles = policiesDir.listFiles(fileFilter);
-
+        File[] entityFiles;
+        File[] locationFiles;
+        File[] policyFiles;
+        try {
+            entityFiles = entitiesDir.listFiles(fileFilter);
+            locationFiles = locationsDir.listFiles(fileFilter);
+            policyFiles = policiesDir.listFiles(fileFilter);
+        } catch (Exception e) {
+            exceptionHandler.onLoadBrooklynMementoFailed("Failed to list files", e);
+            throw new IllegalStateException("Failed to list memento files in "+dir, e);
+        }
+        
         LOG.info("Loading memento manifest from {}; {} entities, {} locations, {} policies", 
                 new Object[] {dir, entityFiles.length, locationFiles.length, policyFiles.length});
         
@@ -134,22 +131,34 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
         
         try {
             for (File file : entityFiles) {
-                String contents = readFile(file);
-                String id = (String) XmlUtil.xpath(contents, "/entity/id");
-                String type = (String) XmlUtil.xpath(contents, "/entity/type");
-                builder.entity(id, type);
+                try {
+                    String contents = readFile(file);
+                    String id = (String) XmlUtil.xpath(contents, "/entity/id");
+                    String type = (String) XmlUtil.xpath(contents, "/entity/type");
+                    builder.entity(id, type);
+                } catch (Exception e) {
+                    exceptionHandler.onLoadEntityMementoFailed("File "+file, e);
+                }
             }
             for (File file : locationFiles) {
-                String contents = readFile(file);
-                String id = (String) XmlUtil.xpath(contents, "/location/id");
-                String type = (String) XmlUtil.xpath(contents, "/location/type");
-                builder.location(id, type);
+                try {
+                    String contents = readFile(file);
+                    String id = (String) XmlUtil.xpath(contents, "/location/id");
+                    String type = (String) XmlUtil.xpath(contents, "/location/type");
+                    builder.location(id, type);
+                } catch (Exception e) {
+                    exceptionHandler.onLoadLocationMementoFailed("File "+file, e);
+                }
             }
             for (File file : policyFiles) {
-                String contents = readFile(file);
-                String id = (String) XmlUtil.xpath(contents, "/policy/id");
-                String type = (String) XmlUtil.xpath(contents, "/policy/type");
-                builder.policy(id, type);
+                try {
+                    String contents = readFile(file);
+                    String id = (String) XmlUtil.xpath(contents, "/policy/id");
+                    String type = (String) XmlUtil.xpath(contents, "/policy/type");
+                    builder.policy(id, type);
+                } catch (Exception e) {
+                    exceptionHandler.onLoadPolicyMementoFailed("File "+file, e);
+                }
             }
             
             if (LOG.isDebugEnabled()) LOG.debug("Loaded memento manifest; took {}", Time.makeTimeStringRounded(stopwatch.elapsed(TimeUnit.MILLISECONDS))); 
@@ -161,7 +170,7 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
     }
 
     @Override
-    public BrooklynMemento loadMemento(LookupContext lookupContext) throws IOException {
+    public BrooklynMemento loadMemento(LookupContext lookupContext, RebindExceptionHandler exceptionHandler) throws IOException {
         if (!running) {
             throw new IllegalStateException("Persister not running; cannot load memento from "+dir);
         }
@@ -173,9 +182,17 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
                 return !file.getName().endsWith(".tmp");
             }
         };
-        File[] entityFiles = entitiesDir.listFiles(fileFilter);
-        File[] locationFiles = locationsDir.listFiles(fileFilter);
-        File[] policyFiles = policiesDir.listFiles(fileFilter);
+        File[] entityFiles;
+        File[] locationFiles;
+        File[] policyFiles;
+        try {
+            entityFiles = entitiesDir.listFiles(fileFilter);
+            locationFiles = locationsDir.listFiles(fileFilter);
+            policyFiles = policiesDir.listFiles(fileFilter);
+        } catch (Exception e) {
+            exceptionHandler.onLoadBrooklynMementoFailed("Failed to list files", e);
+            throw new IllegalStateException("Failed to list memento files in "+dir, e);
+        }
 
         LOG.info("Loading memento from {}; {} entities, {} locations, {} policies", 
                 new Object[] {dir, entityFiles.length, locationFiles.length, policyFiles.length});
@@ -185,30 +202,42 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
         serializer.setLookupContext(lookupContext);
         try {
             for (File file : entityFiles) {
-                EntityMemento memento = (EntityMemento) serializer.fromString(readFile(file));
-                if (memento == null) {
-                    LOG.warn("No entity-memento deserialized from file "+file+"; ignoring and continuing");
-                } else {
-                    builder.entity(memento);
-                    if (memento.isTopLevelApp()) {
-                        builder.applicationId(memento.getId());
+                try {
+                    EntityMemento memento = (EntityMemento) serializer.fromString(readFile(file));
+                    if (memento == null) {
+                        LOG.warn("No entity-memento deserialized from file "+file+"; ignoring and continuing");
+                    } else {
+                        builder.entity(memento);
+                        if (memento.isTopLevelApp()) {
+                            builder.applicationId(memento.getId());
+                        }
                     }
+                } catch (Exception e) {
+                    exceptionHandler.onLoadEntityMementoFailed("File "+file, e);
                 }
             }
             for (File file : locationFiles) {
-                LocationMemento memento = (LocationMemento) serializer.fromString(readFile(file));
-                if (memento == null) {
-                    LOG.warn("No location-memento deserialized from file "+file+"; ignoring and continuing");
-                } else {
-                    builder.location(memento);
+                try {
+                    LocationMemento memento = (LocationMemento) serializer.fromString(readFile(file));
+                    if (memento == null) {
+                        LOG.warn("No location-memento deserialized from file "+file+"; ignoring and continuing");
+                    } else {
+                        builder.location(memento);
+                    }
+                } catch (Exception e) {
+                    exceptionHandler.onLoadLocationMementoFailed("File "+file, e);
                 }
             }
             for (File file : policyFiles) {
-                PolicyMemento memento = (PolicyMemento) serializer.fromString(readFile(file));
-                if (memento == null) {
-                    LOG.warn("No policy-memento deserialized from file "+file+"; ignoring and continuing");
-                } else {
-                    builder.policy(memento);
+                try {
+                    PolicyMemento memento = (PolicyMemento) serializer.fromString(readFile(file));
+                    if (memento == null) {
+                        LOG.warn("No policy-memento deserialized from file "+file+"; ignoring and continuing");
+                    } else {
+                        builder.policy(memento);
+                    }
+                } catch (Exception e) {
+                    exceptionHandler.onLoadPolicyMementoFailed("File "+file, e);
                 }
             }
             
@@ -245,7 +274,7 @@ public class BrooklynMementoPersisterToMultiFile implements BrooklynMementoPersi
             if (LOG.isDebugEnabled()) LOG.debug("Ignoring checkpointed delta of memento, because not running");
             return;
         }
-        if (LOG.isDebugEnabled()) LOG.debug("Checkpointed delta of memento; updating {} entities, {} locations and {} policies; " +
+        if (LOG.isTraceEnabled()) LOG.trace("Checkpointed delta of memento; updating {} entities, {} locations and {} policies; " +
         		"removing {} entities, {} locations and {} policies", 
                 new Object[] {delta.entities(), delta.locations(), delta.policies(),
                 delta.removedEntityIds(), delta.removedLocationIds(), delta.removedPolicyIds()});
