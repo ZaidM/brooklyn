@@ -29,11 +29,9 @@ import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
-import org.jclouds.ContextBuilder;
 import org.jclouds.abiquo.compute.options.AbiquoTemplateOptions;
 import org.jclouds.cloudstack.compute.options.CloudStackTemplateOptions;
 import org.jclouds.compute.ComputeService;
-import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.compute.RunNodesException;
 import org.jclouds.compute.config.AdminAccessConfiguration;
 import org.jclouds.compute.domain.ComputeMetadata;
@@ -49,14 +47,11 @@ import org.jclouds.compute.domain.TemplateBuilder;
 import org.jclouds.compute.domain.TemplateBuilderSpec;
 import org.jclouds.compute.functions.Sha512Crypt;
 import org.jclouds.compute.options.TemplateOptions;
-import org.jclouds.docker.DockerApi;
-import org.jclouds.docker.domain.Container;
 import org.jclouds.domain.Credentials;
 import org.jclouds.domain.LocationScope;
 import org.jclouds.domain.LoginCredentials;
 import org.jclouds.ec2.compute.options.EC2TemplateOptions;
 import org.jclouds.googlecomputeengine.compute.options.GoogleComputeEngineTemplateOptions;
-import org.jclouds.logging.slf4j.config.SLF4JLoggingModule;
 import org.jclouds.openstack.nova.v2_0.compute.options.NovaTemplateOptions;
 import org.jclouds.rest.AuthorizationException;
 import org.jclouds.scriptbuilder.domain.Statement;
@@ -67,7 +62,6 @@ import org.jclouds.scriptbuilder.statements.login.AdminAccess;
 import org.jclouds.scriptbuilder.statements.login.ReplaceShadowPasswordEntry;
 import org.jclouds.scriptbuilder.statements.ssh.AuthorizeRSAPublicKeys;
 import org.jclouds.softlayer.compute.options.SoftLayerTemplateOptions;
-import org.jclouds.sshj.config.SshjSshClientModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -128,6 +122,7 @@ import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Optional;
+import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Splitter;
 import com.google.common.base.Stopwatch;
@@ -145,7 +140,6 @@ import com.google.common.collect.Sets.SetView;
 import com.google.common.io.Files;
 import com.google.common.net.HostAndPort;
 import com.google.common.primitives.Ints;
-import com.google.inject.Module;
 
 /**
  * For provisioning and managing VMs in a particular provider/region, using jclouds.
@@ -643,7 +637,7 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
             }
 
             if ("docker".equals(this.getProvider())) {
-                Map<Integer, Integer> portMappings = getPortMappingsForDocker(sshMachineLocation);
+                Map<Integer, Integer> portMappings = JcloudsUtil.dockerPortMappingsFor(this, node.getId());
                 PortForwardManager portForwardManager = setup.get(PORT_FORWARDING_MANAGER);
                 if (portForwardManager != null) {
                     for(Integer containerPort : portMappings.keySet()) {
@@ -749,62 +743,6 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
             }
             
             throw Exceptions.propagate(e);
-            
-        } finally {
-            //leave it open for reuse
-//            computeService.getContext().close();
-        }
-
-    }
-
-    private Map<Integer, Integer> getPortMappingsForDocker(JcloudsSshMachineLocation machine) {
-        ComputeServiceContext context = null;
-        try {
-            context = ContextBuilder.newBuilder("docker")
-                    .endpoint(machine.getParent().getEndpoint())
-                    .credentials(getIdentity(), getCredential())
-                    .modules(ImmutableSet.<Module>of(new SLF4JLoggingModule(), new SshjSshClientModule()))
-                    .build(ComputeServiceContext.class);
-            DockerApi api = context.unwrapApi(DockerApi.class);
-            String containerId = machine.getJcloudsId();
-            Container container = api.getRemoteApi().inspectContainer(containerId);
-            Map<Integer, Integer> portMappings = Maps.newLinkedHashMap();
-            Map<String, List<Map<String, String>>> ports = container.getNetworkSettings().getPorts();
-            LOG.debug("jclouds will use these ports {} (from {}) to provision {}",
-                    new Object[] {ports, machine, this});
-            for (Map.Entry<String, List<Map<String, String>>> entrySet : ports.entrySet()) {
-                String containerPort = Iterables.get(Splitter.on("/").split(entrySet.getKey()), 0);
-                String hostPort = Iterables.getOnlyElement(Iterables.transform(entrySet.getValue(),
-                        new Function<Map<String, String>, String>() {
-                            @Override
-                            public String apply(Map<String, String> hostIpAndPort) {
-                                return hostIpAndPort.get("HostPort");
-                            }
-                        }));
-                portMappings.put(Integer.parseInt(containerPort), Integer.parseInt(hostPort));
-            }
-            return portMappings;
-        } finally {
-            if (context != null) {
-                context.close();
-            }
-        }
-    }
-
-    private void mapSecurityGroupRuleToIpTables(ComputeService computeService, NodeMetadata node,
-            LoginCredentials credentials, String networkInterface, Iterable<Integer> ports) {
-        for (Integer port : ports) {
-            String insertIptableRule = IptablesCommands.insertIptablesRule(Chain.INPUT, networkInterface, 
-                    Protocol.TCP, port, Policy.ACCEPT);
-            Statement statement = Statements.newStatementList(exec(insertIptableRule));
-            ExecResponse response = computeService.runScriptOnNode(node.getId(), statement,
-                    overrideLoginCredentials(credentials).runAsRoot(false));
-            if (response.getExitStatus() != 0) {
-                String msg = String.format("Cannot insert the iptables rule for port %d. Error: %s", port,
-                        response.getError());
-                LOG.error(msg);
-                throw new RuntimeException(msg);
-            }
         }
     }
     
@@ -1435,33 +1373,59 @@ public class JcloudsLocation extends AbstractCloudMachineProvisioningLocation im
         try {
             if (setup.getDescription()==null) setCreationString(setup);
             
-            String rawId = (String) checkNotNull(setup.getStringKey("id"), "id");
-            String hostname = (String) setup.getStringKey("hostname");
+            final String rawId = (String) setup.getStringKey("id");
+            final String rawHostname = (String) setup.getStringKey("hostname");
             String user = checkNotNull(getUser(setup), "user");
-            String region = (String) setup.getStringKey("region");
-            String id = rawId.contains("/") ? rawId : (((region != null) ? region+"/" : "") + rawId);
+            final String rawRegion = (String) setup.getStringKey("region");
             
             LOG.info("Rebinding to VM {} ({}@{}), in jclouds location for provider {}", 
-                    new Object[] {id, user, (hostname != null ? hostname : "<unspecified>"), getProvider()});
+                    new Object[] {rawId!=null ? rawId : "<lookup>", 
+                        user, 
+                        (rawHostname != null ? rawHostname : "<unspecified>"), 
+                        getProvider()});
             
-            // can we allow re-use ?  previously didn't
             ComputeService computeService = JcloudsUtil.findComputeService(setup, true);
-            NodeMetadata node = computeService.getNodeMetadata(id);
-            if (node == null) {
-                throw new IllegalArgumentException("Node not found with id "+id);
-            }
-    
+            
+            Set<? extends NodeMetadata> candidateNodes = computeService.listNodesDetailsMatching(new Predicate<ComputeMetadata>() {
+                @Override
+                public boolean apply(ComputeMetadata input) {
+                    // ID exact match
+                    if (rawId!=null) {
+                        if (rawId.equals(input.getId())) return true;
+                        // AWS format
+                        if (rawRegion!=null && (rawRegion+"/"+rawId).equals(input.getId())) return true;
+                    }
+                    // else do node metadata lookup
+                    if (!(input instanceof NodeMetadata)) return false;
+                    if (rawHostname!=null && rawHostname.equalsIgnoreCase( ((NodeMetadata)input).getHostname() )) return true;
+                    if (rawHostname!=null && ((NodeMetadata)input).getPublicAddresses().contains(rawHostname)) return true;
+                    
+                    if (rawId!=null && rawId.equalsIgnoreCase( ((NodeMetadata)input).getHostname() )) return true;
+                    if (rawId!=null && ((NodeMetadata)input).getPublicAddresses().contains(rawId)) return true;
+                    // don't do private IP's because those might be repeated
+                    
+                    if (rawId!=null && rawId.equalsIgnoreCase( ((NodeMetadata)input).getProviderId() )) return true;
+                    if (rawHostname!=null && rawHostname.equalsIgnoreCase( ((NodeMetadata)input).getProviderId() )) return true;
+                    
+                    return false;
+                }
+            });
+            
+            if (candidateNodes.isEmpty())
+                throw new IllegalArgumentException("Jclouds node not found for rebind, looking for id="+rawId+" and hostname="+rawHostname);
+            if (candidateNodes.size()>1)
+                throw new IllegalArgumentException("Jclouds node for rebind matching multiple, looking for id="+rawId+" and hostname="+rawHostname+": "+candidateNodes);
+
+            NodeMetadata node = Iterables.getOnlyElement(candidateNodes);
             String pkd = LocationConfigUtils.getPrivateKeyData(setup);
             if (truth(pkd)) {
                 LoginCredentials expectedCredentials = LoginCredentials.fromCredentials(new Credentials(user, pkd));
                 //override credentials
                 node = NodeMetadataBuilder.fromNodeMetadata(node).credentials(expectedCredentials).build();
             }
+            
             // TODO confirm we can SSH ?
-
-            if (hostname == null) {
-                hostname = getPublicHostname(node, Optional.<HostAndPort>absent(), setup);
-            }
+            // NB if rawHostname not set, get the hostname using getPublicHostname(node, Optional.<HostAndPort>absent(), setup);
 
             return registerJcloudsSshMachineLocation(computeService, node, null, Optional.<HostAndPort>absent(), setup);
             

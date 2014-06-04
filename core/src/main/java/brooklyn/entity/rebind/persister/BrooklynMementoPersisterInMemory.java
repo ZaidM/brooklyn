@@ -15,10 +15,12 @@ import brooklyn.entity.basic.EntityInternal;
 import brooklyn.entity.proxying.EntityProxy;
 import brooklyn.entity.rebind.RebindExceptionHandler;
 import brooklyn.entity.rebind.RebindExceptionHandlerImpl;
-import brooklyn.entity.rebind.RebindExceptionHandlerImpl.RebindFailureMode;
+import brooklyn.entity.rebind.RebindManager;
 import brooklyn.location.Location;
 import brooklyn.location.basic.LocationInternal;
 import brooklyn.mementos.BrooklynMemento;
+import brooklyn.policy.Enricher;
+import brooklyn.policy.Policy;
 import brooklyn.util.collections.MutableList;
 import brooklyn.util.os.Os;
 import brooklyn.util.time.Duration;
@@ -88,6 +90,16 @@ public class BrooklynMementoPersisterInMemory extends AbstractBrooklynMementoPer
                         if (type != null) types.add(type);
                         return (Location) newDummy(types);
                     }
+                    @Override public Policy lookupPolicy(Class<?> type, String id) {
+                        List<Class<?>> types = MutableList.<Class<?>>of(Policy.class);
+                        if (type != null) types.add(type);
+                        return (Policy) newDummy(types);
+                    }
+                    @Override public Enricher lookupEnricher(Class<?> type, String id) {
+                        List<Class<?>> types = MutableList.<Class<?>>of(Enricher.class);
+                        if (type != null) types.add(type);
+                        return (Enricher) newDummy(types);
+                    }
                     private Object newDummy(List<Class<?>> types) {
                         return java.lang.reflect.Proxy.newProxyInstance(
                             classLoader,
@@ -101,7 +113,7 @@ public class BrooklynMementoPersisterInMemory extends AbstractBrooklynMementoPer
                 };
 
                 // Not actually reconstituting, because need to use a real lookupContext to reconstitute all the entities
-                RebindExceptionHandler exceptionHandler = new RebindExceptionHandlerImpl(RebindFailureMode.FAIL_AT_END, RebindFailureMode.FAIL_AT_END);
+                RebindExceptionHandler exceptionHandler = new RebindExceptionHandlerImpl(RebindManager.RebindFailureMode.FAIL_AT_END, RebindManager.RebindFailureMode.FAIL_AT_END);
                 persister.loadMemento(dummyLookupContext, exceptionHandler);
             } finally {
                 Os.tryDeleteDirectory(tempDir.getAbsolutePath());
