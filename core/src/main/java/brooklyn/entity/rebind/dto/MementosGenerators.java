@@ -33,6 +33,7 @@ import brooklyn.util.collections.MutableMap;
 import brooklyn.util.config.ConfigBag;
 import brooklyn.util.flags.FlagUtils;
 
+import com.google.common.base.Function;
 import com.google.common.base.Predicates;
 
 public class MementosGenerators {
@@ -150,6 +151,16 @@ public class MementosGenerators {
         return builder;
     }
     
+    public static Function<Entity, EntityMemento> entityMementoFunction() {
+        return new Function<Entity,EntityMemento>() {
+            @Override
+            public EntityMemento apply(Entity input) {
+                return MementosGenerators.newEntityMemento(input);
+            }
+        };
+    }
+
+    
     /**
      * Given a location, extracts its state for serialization.
      * 
@@ -168,10 +179,14 @@ public class MementosGenerators {
         Set<String> nonPersistableFlagNames = MutableMap.<String,Object>builder()
                 .putAll(FlagUtils.getFieldsWithFlagsWithModifiers(location, Modifier.TRANSIENT))
                 .putAll(FlagUtils.getFieldsWithFlagsWithModifiers(location, Modifier.STATIC))
+                .put("id", String.class)
                 .filterValues(Predicates.not(Predicates.instanceOf(ConfigKey.class)))
                 .build()
                 .keySet();
-        Map<String, Object> persistableFlags = FlagUtils.getFieldsWithFlagsExcludingModifiers(location, Modifier.STATIC ^ Modifier.TRANSIENT);
+        Map<String, Object> persistableFlags = MutableMap.<String, Object>builder()
+                .putAll(FlagUtils.getFieldsWithFlagsExcludingModifiers(location, Modifier.STATIC ^ Modifier.TRANSIENT))
+                .removeAll(nonPersistableFlagNames)
+                .build();
         ConfigBag persistableConfig = new ConfigBag().copy( ((AbstractLocation)location).getLocalConfigBag() ).removeAll(nonPersistableFlagNames);
 
         builder.type = location.getClass().getName();
@@ -190,6 +205,16 @@ public class MementosGenerators {
         
         return builder;
     }
+    
+    public static Function<Location, LocationMemento> locationMementoFunction() {
+        return new Function<Location,LocationMemento>() {
+            @Override
+            public LocationMemento apply(Location input) {
+                return MementosGenerators.newLocationMemento(input);
+            }
+        };
+    }
+
     
     /**
      * Given a policy, extracts its state for serialization.
@@ -217,10 +242,25 @@ public class MementosGenerators {
             builder.config.put(key.getName(), value); 
         }
         
-        builder.config.putAll(FlagUtils.getFieldsWithFlagsExcludingModifiers(policy, Modifier.STATIC ^ Modifier.TRANSIENT));
+        Map<String, Object> persistableFlags = MutableMap.<String, Object>builder()
+                .putAll(FlagUtils.getFieldsWithFlagsExcludingModifiers(policy, Modifier.STATIC ^ Modifier.TRANSIENT))
+                .remove("id")
+                .remove("name")
+                .build();
+        builder.config.putAll(persistableFlags);
 
         return builder;
     }
+    
+    public static Function<Policy, PolicyMemento> policyMementoFunction() {
+        return new Function<Policy,PolicyMemento>() {
+            @Override
+            public PolicyMemento apply(Policy input) {
+                return MementosGenerators.newPolicyMemento(input);
+            }
+        };
+    }
+
     
     /**
      * Given an enricher, extracts its state for serialization.
@@ -248,7 +288,12 @@ public class MementosGenerators {
             builder.config.put(key.getName(), value); 
         }
         
-        builder.config.putAll(FlagUtils.getFieldsWithFlagsExcludingModifiers(enricher, Modifier.STATIC ^ Modifier.TRANSIENT));
+        Map<String, Object> persistableFlags = MutableMap.<String, Object>builder()
+                .putAll(FlagUtils.getFieldsWithFlagsExcludingModifiers(enricher, Modifier.STATIC ^ Modifier.TRANSIENT))
+                .remove("id")
+                .remove("name")
+                .build();
+        builder.config.putAll(persistableFlags);
 
         return builder;
     }
@@ -267,4 +312,14 @@ public class MementosGenerators {
         }
         return value;
     }
+    
+    public static Function<Enricher, EnricherMemento> enricherMementoFunction() {
+        return new Function<Enricher,EnricherMemento>() {
+            @Override
+            public EnricherMemento apply(Enricher input) {
+                return MementosGenerators.newEnricherMemento(input);
+            }
+        };
+    }
+
 }

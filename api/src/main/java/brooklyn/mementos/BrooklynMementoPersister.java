@@ -9,6 +9,7 @@ import brooklyn.entity.Entity;
 import brooklyn.entity.rebind.RebindExceptionHandler;
 import brooklyn.entity.rebind.RebindManager;
 import brooklyn.location.Location;
+import brooklyn.management.ManagementContext;
 import brooklyn.policy.Enricher;
 import brooklyn.policy.Policy;
 import brooklyn.util.time.Duration;
@@ -22,10 +23,11 @@ import com.google.common.annotations.VisibleForTesting;
 public interface BrooklynMementoPersister {
 
     public static interface LookupContext {
-        Entity lookupEntity(Class<?> type, String id);
-        Location lookupLocation(Class<?> type, String id);
-        Policy lookupPolicy(Class<?> type, String id);
-        Enricher lookupEnricher(Class<?> type, String id);
+        ManagementContext lookupManagementContext();
+        Entity lookupEntity(String id);
+        Location lookupLocation(String id);
+        Policy lookupPolicy(String id);
+        Enricher lookupEnricher(String id);
     }
 
     BrooklynMementoManifest loadMementoManifest(RebindExceptionHandler exceptionHandler) throws IOException;

@@ -24,6 +24,7 @@ import brooklyn.entity.trait.Identifiable;
 import brooklyn.event.basic.BasicAttributeSensor;
 import brooklyn.event.basic.BasicConfigKey;
 import brooklyn.location.Location;
+import brooklyn.management.ManagementContext;
 import brooklyn.management.Task;
 import brooklyn.mementos.BrooklynMementoPersister.LookupContext;
 import brooklyn.policy.Enricher;
@@ -35,6 +36,7 @@ import com.thoughtworks.xstream.converters.Converter;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.SingleValueConverter;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
+import com.thoughtworks.xstream.core.ReferencingMarshallingContext;
 import com.thoughtworks.xstream.core.util.HierarchicalStreams;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
@@ -80,6 +82,9 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
         xstream.registerConverter(new PolicyConverter());
         xstream.registerConverter(new EnricherConverter());
         xstream.registerConverter(new EntityConverter());
+        
+        xstream.registerConverter(new ManagementContextConverter());
+        
         xstream.registerConverter(new TaskConverter(xstream.getMapper()));
     }
     
@@ -152,21 +157,12 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
     public abstract class IdentifiableConverter<IT extends Identifiable> implements SingleValueConverter {
         private final Class<IT> clazz;
         
-        /*
-         * Ugly hack so we know what type to deserialize the string as. Remember the last call to canConvert!
-         * This is needed for RebindManager's two-phase approach, where in the first phase we create a 
-         * dynamic proxy to represent the Entity/Location (can't return null as ImmutableList etc won't accept
-         * null values).
-         */
-        private Class<?> toClazz;
-        
         IdentifiableConverter(Class<IT> clazz) {
             this.clazz = clazz;
         }
         @Override
         public boolean canConvert(@SuppressWarnings("rawtypes") Class type) {
             boolean result = clazz.isAssignableFrom(type);
-            toClazz = (result) ? type : null;
             return result;
         }
 
@@ -180,11 +176,11 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
                 LOG.warn("Cannot unmarshall from persisted xml {} {}; no lookup context supplied!", clazz.getSimpleName(), str);
                 return null;
             } else {
-                return lookup(toClazz, str);
+                return lookup(str);
             }
         }
         
-        protected abstract IT lookup(Class<?> type, String id);
+        protected abstract IT lookup(String id);
     }
 
     public class LocationConverter extends IdentifiableConverter<Location> {
@@ -192,8 +188,8 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
             super(Location.class);
         }
         @Override
-        protected Location lookup(Class<?> type, String id) {
-            return lookupContext.lookupLocation(type, id);
+        protected Location lookup(String id) {
+            return lookupContext.lookupLocation(id);
         }
     }
 
@@ -202,8 +198,8 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
             super(Policy.class);
         }
         @Override
-        protected Policy lookup(Class<?> type, String id) {
-            return lookupContext.lookupPolicy(type, id);
+        protected Policy lookup(String id) {
+            return lookupContext.lookupPolicy(id);
         }
     }
 
@@ -212,8 +208,8 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
             super(Enricher.class);
         }
         @Override
-        protected Enricher lookup(Class<?> type, String id) {
-            return lookupContext.lookupEnricher(type, id);
+        protected Enricher lookup(String id) {
+            return lookupContext.lookupEnricher(id);
         }
     }
     
@@ -222,11 +218,12 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
             super(Entity.class);
         }
         @Override
-        protected Entity lookup(Class<?> type, String id) {
-            return lookupContext.lookupEntity(type, id);
+        protected Entity lookup(String id) {
+            return lookupContext.lookupEntity(id);
         }
     }
 
+    static boolean loggedTaskWarning = false;
     public class TaskConverter implements Converter {
         private final Mapper mapper;
         
@@ -246,10 +243,18 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
                 } catch (InterruptedException e) {
                     throw Exceptions.propagate(e);
                 } catch (ExecutionException e) {
-                    LOG.warn("Unexpected exception getting done (and non-error) task result for "+source+"; continuing", e);
+                    LOG.warn("Unexpected exception getting done (and non-error) task result for "+source+"; continuing: "+e, e);
                 }
             } else {
                 // TODO How to log sensibly, without it logging this every second?!
+                // jun 2014, have added a "log once" which is not ideal but better than the log never behaviour
+                if (!loggedTaskWarning) {
+                    LOG.warn("Intercepting and skipping request to serialize a Task"
+                        + (context instanceof ReferencingMarshallingContext ? " at "+((ReferencingMarshallingContext)context).currentPath() : "")+
+                        " (only logging this once): "+source);
+                    loggedTaskWarning = true;
+                }
+                
                 return;
             }
         }
@@ -266,4 +271,28 @@ public class XmlMementoSerializer<T> extends XmlSerializer<T> implements Memento
             }
         }
     }
+    
+    public class ManagementContextConverter implements Converter {
+        @Override
+        public boolean canConvert(@SuppressWarnings("rawtypes") Class type) {
+            return ManagementContext.class.isAssignableFrom(type);
+        }
+        @Override
+        public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
+            // we write nothing, and always insert the current mgmt context
+            
+            // if we want to explore this further, see #1422; but in short, mgmt is a common part of DSL resolution
+//            if (!loggedMgmtContextWarning) {
+//                LOG.warn("Intercepting request to serialize management context"
+//                    + (context instanceof ReferencingMarshallingContext ? " at "+((ReferencingMarshallingContext)context).currentPath() : "")+
+//                    " (only logging this once): "+source);
+//                loggedMgmtContextWarning = true;
+//            }
+        }
+        @Override
+        public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
+            return lookupContext.lookupManagementContext();
+        }
+    }
+    
 }
