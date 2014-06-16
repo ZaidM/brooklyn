@@ -27,8 +27,6 @@ import brooklyn.util.http.HttpToolResponse;
 
 public class CouchbaseClusterEc2LiveTest extends AbstractEc2LiveTest {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MongoDBEc2LiveTest.class);
-
     @Override
     protected void doTest(Location loc) throws Exception {
         CouchbaseCluster cluster = app.createAndManageChild(EntitySpec.create(CouchbaseCluster.class)
@@ -44,7 +42,6 @@ public class CouchbaseClusterEc2LiveTest extends AbstractEc2LiveTest {
         EntityTestUtils.assertAttributeEqualsEventually(cbNodes.get(0), CouchbaseNode.SERVICE_UP, true);
         EntityTestUtils.assertAttributeEqualsEventually(cbNodes.get(1), CouchbaseNode.SERVICE_UP, true);
 
-        //check
         String webAdminUrl = cbNodes.get(0).getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_URL);
         URI baseUri = new URI(format("%s/pools", webAdminUrl));
         HttpClient client = HttpTool.httpClientBuilder().build();

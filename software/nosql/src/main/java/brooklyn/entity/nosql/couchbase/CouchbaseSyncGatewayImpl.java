@@ -1,12 +1,6 @@
 package brooklyn.entity.nosql.couchbase;
 
 
-import java.util.Map;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HostAndPort;
 
 import brooklyn.entity.basic.SoftwareProcessImpl;
@@ -17,7 +11,6 @@ import brooklyn.location.access.BrooklynAccessUtils;
 
 public class CouchbaseSyncGatewayImpl extends SoftwareProcessImpl implements CouchbaseSyncGateway {
 
-    private static final Logger log = LoggerFactory.getLogger(CouchbaseSyncGatewayImpl.class);
     private HttpFeed httpFeed;
 
     @Override

@@ -52,33 +52,45 @@ public interface CouchbaseNode extends SoftwareProcess {
     AttributeSensor<Boolean> IS_PRIMARY_NODE = Sensors.newBooleanSensor("couchbase.isPrimaryNode", "flag to determine if the current couchbase node is the primary node for the cluster");
     AttributeSensor<Boolean> IS_IN_CLUSTER = Sensors.newBooleanSensor("couchbase.isInCluster", "flag to determine if the current couchbase node has been added to a cluster");
     public static final AttributeSensor<String> COUCHBASE_WEB_ADMIN_URL = WebAppServiceConstants.ROOT_URL; // By using this specific sensor, the value will be shown in the summary tab
-    
+
     // Interesting stats
-    AttributeSensor<Integer> OPS = Sensors.newIntegerSensor("couchbase.stats.ops", 
+    AttributeSensor<Integer> OPS = Sensors.newIntegerSensor("couchbase.stats.ops",
             "Retrieved from pools/nodes/<current node>/interestingStats/ops");
-    AttributeSensor<Integer> COUCH_DOCS_DATA_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.docs.data.size", 
+    AttributeSensor<Integer> COUCH_DOCS_DATA_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.docs.data.size",
             "Retrieved from pools/nodes/<current node>/interestingStats/couch_docs_data_size");
-    AttributeSensor<Integer> COUCH_DOCS_ACTUAL_DISK_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.docs.actual.disk.size", 
+    AttributeSensor<Integer> COUCH_DOCS_ACTUAL_DISK_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.docs.actual.disk.size",
             "Retrieved from pools/nodes/<current node>/interestingStats/couch_docs_actual_disk_size");
-    AttributeSensor<Integer> EP_BG_FETCHED = Sensors.newIntegerSensor("couchbase.stats.ep.bg.fetched", 
+    AttributeSensor<Integer> EP_BG_FETCHED = Sensors.newIntegerSensor("couchbase.stats.ep.bg.fetched",
             "Retrieved from pools/nodes/<current node>/interestingStats/ep_bg_fetched");
-    AttributeSensor<Integer> MEM_USED = Sensors.newIntegerSensor("couchbase.stats.mem.used", 
+    AttributeSensor<Integer> MEM_USED = Sensors.newIntegerSensor("couchbase.stats.mem.used",
             "Retrieved from pools/nodes/<current node>/interestingStats/mem_used");
-    AttributeSensor<Integer> COUCH_VIEWS_ACTUAL_DISK_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.views.actual.disk.size", 
+    AttributeSensor<Integer> COUCH_VIEWS_ACTUAL_DISK_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.views.actual.disk.size",
             "Retrieved from pools/nodes/<current node>/interestingStats/couch_views_actual_disk_size");
-    AttributeSensor<Integer> CURR_ITEMS = Sensors.newIntegerSensor("couchbase.stats.curr.items", 
+    AttributeSensor<Integer> CURR_ITEMS = Sensors.newIntegerSensor("couchbase.stats.curr.items",
             "Retrieved from pools/nodes/<current node>/interestingStats/curr_items");
-    AttributeSensor<Integer> VB_REPLICA_CURR_ITEMS = Sensors.newIntegerSensor("couchbase.stats.vb.replica.curr.items", 
+    AttributeSensor<Integer> VB_REPLICA_CURR_ITEMS = Sensors.newIntegerSensor("couchbase.stats.vb.replica.curr.items",
             "Retrieved from pools/nodes/<current node>/interestingStats/vb_replica_curr_items");
-    AttributeSensor<Integer> COUCH_VIEWS_DATA_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.views.data.size", 
+    AttributeSensor<Integer> COUCH_VIEWS_DATA_SIZE = Sensors.newIntegerSensor("couchbase.stats.couch.views.data.size",
             "Retrieved from pools/nodes/<current node>/interestingStats/couch_views_data_size");
-    AttributeSensor<Integer> GET_HITS = Sensors.newIntegerSensor("couchbase.stats.get.hits", 
+    AttributeSensor<Integer> GET_HITS = Sensors.newIntegerSensor("couchbase.stats.get.hits",
             "Retrieved from pools/nodes/<current node>/interestingStats/get_hits");
-    AttributeSensor<Integer> CMD_GET = Sensors.newIntegerSensor("couchbase.stats.cmd.get", 
+    AttributeSensor<Integer> CMD_GET = Sensors.newIntegerSensor("couchbase.stats.cmd.get",
             "Retrieved from pools/nodes/<current node>/interestingStats/cmd_get");
-    AttributeSensor<Integer> CURR_ITEMS_TOT = Sensors.newIntegerSensor("couchbase.stats.curr.items.tot", 
+    AttributeSensor<Integer> CURR_ITEMS_TOT = Sensors.newIntegerSensor("couchbase.stats.curr.items.tot",
             "Retrieved from pools/nodes/<current node>/interestingStats/curr_items_tot");
-    
+    public static final MethodEffector<Void> SERVER_ADD = new MethodEffector<Void>(CouchbaseNode.class, "serverAdd");
+    public static final MethodEffector<Void> REBALANCE = new MethodEffector<Void>(CouchbaseNode.class, "rebalance");
+    public static final MethodEffector<Void> BUCKET_CREATE = new MethodEffector<Void>(CouchbaseNode.class, "bucketCreate");
+
+    @Effector(description = "add a server to a cluster")
+    public void serverAdd(@EffectorParam(name = "serverHostname") String serverToAdd, @EffectorParam(name = "username") String username, @EffectorParam(name = "password") String password);
+
+    @Effector(description = "rebalance the couchbase cluster")
+    public void rebalance();
+
+    @Effector(description = "create a new bucket")
+    public void bucketCreate(@EffectorParam(name = "bucketName") String bucketName, @EffectorParam(name = "bucketType") String bucketType, @EffectorParam(name = "bucketPort") Integer bucketPort, @EffectorParam(name = "bucketRamSize") Integer bucketRamSize, @EffectorParam(name = "bucketReplica") Integer bucketReplica);
+
     // this class is added because the ROOT_URL relies on a static initialization which unfortunately
     // can't be added to
     // an interface.
@@ -90,15 +102,6 @@ public interface CouchbaseNode extends SoftwareProcess {
             RendererHints.register(COUCHBASE_WEB_ADMIN_URL, new RendererHints.NamedActionWithUrl("Open"));
         }
     }
-
-    public static final MethodEffector<Void> SERVER_ADD = new MethodEffector<Void>(CouchbaseNode.class, "serverAdd");
-    public static final MethodEffector<Void> REBALANCE = new MethodEffector<Void>(CouchbaseNode.class, "rebalance");
-
-    @Effector(description = "add a server to a cluster")
-    public void serverAdd(@EffectorParam(name = "serverHostname") String serverToAdd, @EffectorParam(name = "username") String username, @EffectorParam(name = "password") String password);
-
-    @Effector(description = "rebalance the couchbase cluster")
-    public void rebalance();
 
 
 }

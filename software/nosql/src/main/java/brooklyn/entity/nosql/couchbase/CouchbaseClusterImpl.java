@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import com.google.common.base.Functions;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicates;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 
 import brooklyn.entity.Entity;
@@ -35,7 +36,6 @@ import brooklyn.event.feed.http.HttpFeed;
 import brooklyn.event.feed.http.HttpPollConfig;
 import brooklyn.event.feed.http.HttpValueFunctions;
 import brooklyn.location.Location;
-import brooklyn.util.collections.MutableMap;
 import brooklyn.util.collections.MutableSet;
 import brooklyn.util.task.DynamicTasks;
 import brooklyn.util.task.TaskBuilder;
@@ -50,7 +50,6 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
     public void init() {
         super.init();
         log.info("Initializing the Couchbase cluster...");
-//        resetBucketCreation = <new http feed, polling to see if buckets are being created... defaults to STOPPED>
         setAttribute(BUCKET_CREATION_IN_PROGRESS, false);
         bucketCreationExecutor = Executors.newSingleThreadExecutor();
     }
@@ -119,9 +118,7 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
     }
 
     protected void connectSensors() {
-        Map<String, Object> flags = MutableMap.<String, Object>builder()
-                .put("name", "Controller targets tracker")
-                .build();
+        Map<String, ?> flags = ImmutableMap.of("name", "Controller targets tracker");
 
         AbstractMembershipTrackingPolicy serverPoolMemberTrackerPolicy = new AbstractMembershipTrackingPolicy(flags) {
             protected void onEntityChange(Entity member) {
@@ -148,44 +145,43 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
                 new Object[]{this, member, member.getLocations()});
 
         //FIXME: make use of servers to be added after cluster initialization.
-        synchronized (mutex) {
-            if (belongsInServerPool(member)) {
+        if (belongsInServerPool(member)) {
 
-                Optional<Set<Entity>> upNodes = Optional.fromNullable(getUpNodes());
-                if (upNodes.isPresent()) {
+            Optional<Set<Entity>> upNodes = Optional.fromNullable(getUpNodes());
+            if (upNodes.isPresent()) {
 
-                    if (!upNodes.get().contains(member)) {
-                        Set<Entity> newNodes = Sets.newHashSet(getUpNodes());
-                        newNodes.add(member);
-                        setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
-
-                        //add to set of servers to be added.
-                        if (isClusterInitialized()) {
-                            addServer(member);
-                        }
-                    } else {
-                        log.warn("Node already in cluster up nodes {}: {};", this, member);
-                    }
-                } else {
-                    Set<Entity> newNodes = Sets.newHashSet();
+                if (!upNodes.get().contains(member)) {
+                    Set<Entity> newNodes = Sets.newHashSet(getUpNodes());
                     newNodes.add(member);
                     setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
 
+                    //add to set of servers to be added.
                     if (isClusterInitialized()) {
                         addServer(member);
                     }
+                } else {
+                    log.warn("Node already in cluster up nodes {}: {};", this, member);
                 }
             } else {
-                Set<Entity> upNodes = getUpNodes();
-                if (upNodes != null && upNodes.contains(member)) {
-                    upNodes.remove(member);
-                    setAttribute(COUCHBASE_CLUSTER_UP_NODES, upNodes);
-                    log.info("Removing couchbase node {}: {}; from cluster", new Object[]{this, member});
+                Set<Entity> newNodes = Sets.newHashSet();
+                newNodes.add(member);
+                setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
+
+                if (isClusterInitialized()) {
+                    addServer(member);
                 }
             }
-            if (log.isTraceEnabled()) log.trace("Done {} checkEntity {}", this, member);
+        } else {
+            Set<Entity> upNodes = getUpNodes();
+            if (upNodes != null && upNodes.contains(member)) {
+                upNodes.remove(member);
+                setAttribute(COUCHBASE_CLUSTER_UP_NODES, upNodes);
+                log.info("Removing couchbase node {}: {}; from cluster", new Object[]{this, member});
+            }
         }
+        if (log.isTraceEnabled()) log.trace("Done {} checkEntity {}", this, member);
     }
+
 
     protected boolean belongsInServerPool(Entity member) {
         if (!groovyTruth(member.getAttribute(Startable.SERVICE_UP))) {
