@@ -12,7 +12,6 @@ import org.apache.http.client.HttpClient;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
-import org.omg.CORBA.OBJECT_NOT_EXIST;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -51,10 +50,10 @@ public class CouchbaseClusterBucketsTest {
         testLocation = app.getManagementContext().getLocationRegistry().resolve(provider);
     }
 
-//    @AfterMethod(alwaysRun = true)
-//    public void shutdown() {
-//        Entities.destroyAll(app.getManagementContext());
-//    }
+    @AfterMethod(alwaysRun = true)
+    public void shutdown() {
+        Entities.destroyAll(app.getManagementContext());
+    }
 
     @Test(groups = "Live")
     public void canCreateBuckets() throws Exception {
