@@ -4,10 +4,20 @@ import static brooklyn.util.JavaGroovyEquivalents.groovyTruth;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Function;
+import com.google.common.base.Functions;
+import com.google.common.base.Optional;
+import com.google.common.base.Predicates;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 import brooklyn.enricher.Enrichers;
 import brooklyn.entity.Entity;
@@ -22,42 +32,45 @@ import brooklyn.entity.trait.Startable;
 import brooklyn.event.AttributeSensor;
 import brooklyn.event.SensorEvent;
 import brooklyn.event.SensorEventListener;
+import brooklyn.event.basic.DependentConfiguration;
+import brooklyn.event.feed.http.HttpFeed;
+import brooklyn.event.feed.http.HttpPollConfig;
+import brooklyn.event.feed.http.HttpValueFunctions;
 import brooklyn.location.Location;
 import brooklyn.policy.PolicySpec;
 import brooklyn.util.collections.MutableSet;
+import brooklyn.util.task.DynamicTasks;
+import brooklyn.util.task.TaskBuilder;
 import brooklyn.util.task.Tasks;
 import brooklyn.util.time.Time;
-
-import com.google.common.base.Function;
-import com.google.common.base.Optional;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 
 public class CouchbaseClusterImpl extends DynamicClusterImpl implements CouchbaseCluster {
     private static final Logger log = LoggerFactory.getLogger(CouchbaseClusterImpl.class);
     private final Object mutex = new Object[0];
+    private final HttpFeed[] resetBucketCreation = new HttpFeed[]{null};
 
     public void init() {
         log.info("Initializing the Couchbase cluster...");
         super.init();
-        
+
         addEnricher(
-            Enrichers.builder()
-                .transforming(COUCHBASE_CLUSTER_UP_NODES)
-                .from(this)
-                .publishing(COUCHBASE_CLUSTER_UP_NODE_ADDRESSES)
-                .computing(new Function<Set<Entity>, List<String>>() {
-                    @Override public List<String> apply(Set<Entity> input) {
-                        List<String> addresses = Lists.newArrayList();
-                        for (Entity entity : input) {
-                            addresses.add(String.format("%s:%s", entity.getAttribute(Attributes.ADDRESS), 
-                                    entity.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_PORT)));
-                        }
-                        return addresses;
-                }
-            }).build()
+                Enrichers.builder()
+                        .transforming(COUCHBASE_CLUSTER_UP_NODES)
+                        .from(this)
+                        .publishing(COUCHBASE_CLUSTER_UP_NODE_ADDRESSES)
+                        .computing(new Function<Set<Entity>, List<String>>() {
+                            @Override
+                            public List<String> apply(Set<Entity> input) {
+                                List<String> addresses = Lists.newArrayList();
+                                for (Entity entity : input) {
+                                    addresses.add(String.format("%s:%s", entity.getAttribute(Attributes.ADDRESS),
+                                            entity.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_PORT)));
+                                }
+                                return addresses;
+                            }
+                        }).build()
         );
-        
+
         addSummingMemberEnricher(CouchbaseNode.OPS);
         addSummingMemberEnricher(CouchbaseNode.COUCH_DOCS_DATA_SIZE);
         addSummingMemberEnricher(CouchbaseNode.COUCH_DOCS_ACTUAL_DISK_SIZE);
@@ -71,14 +84,14 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
         addSummingMemberEnricher(CouchbaseNode.CMD_GET);
         addSummingMemberEnricher(CouchbaseNode.CURR_ITEMS_TOT);
     }
-    
+
     private void addSummingMemberEnricher(AttributeSensor<Integer> source) {
         addEnricher(Enrichers.builder()
-            .aggregating(source)
-            .publishing(source)
-            .fromMembers()
-            .computingSum()
-            .build()
+                        .aggregating(source)
+                        .publishing(source)
+                        .fromMembers()
+                        .computingSum()
+                        .build()
         );
     }
 
@@ -104,7 +117,7 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
             serversToAdd.remove(getPrimaryNode());
 
             if (getUpNodes().size() >= getQuorumSize() && getUpNodes().size() > 1) {
-                log.info("number of SERVICE_UP nodes:{} in cluster:{} did reached Quorum:{}, adding the servers", new Object[]{getUpNodes().size(), getId(), getQuorumSize()});
+                log.info("number of SERVICE_UP nodes:{} in cluster:{} reached Quorum:{}, adding the servers", new Object[]{getUpNodes().size(), getId(), getQuorumSize()});
                 addServers(serversToAdd);
 
                 //wait for servers to be added to the couchbase server
@@ -115,6 +128,10 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
                     Tasks.resetBlockingDetails();
                 }
                 Entities.invokeEffector(this, getPrimaryNode(), CouchbaseNode.REBALANCE);
+
+                if (Optional.fromNullable(CREATE_BUCKETS).isPresent()) {
+                    createBuckets();
+                }
 
                 setAttribute(IS_CLUSTER_INITIALIZED, true);
             } else {
@@ -149,63 +166,49 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
                 .configure("group", this));
     }
 
-    public static class MemberTrackingPolicy extends AbstractMembershipTrackingPolicy {
-        @Override protected void onEntityChange(Entity member) {
-            ((CouchbaseClusterImpl)entity).onServerPoolMemberChanged(member);
-        }
-
-        @Override protected void onEntityAdded(Entity member) {
-            ((CouchbaseClusterImpl)entity).onServerPoolMemberChanged(member);
-        }
-
-        @Override protected void onEntityRemoved(Entity member) {
-            ((CouchbaseClusterImpl)entity).onServerPoolMemberChanged(member);
-        }
-    };
-
     protected synchronized void onServerPoolMemberChanged(Entity member) {
         if (log.isTraceEnabled()) log.trace("For {}, considering membership of {} which is in locations {}",
                 new Object[]{this, member, member.getLocations()});
 
         //FIXME: make use of servers to be added after cluster initialization.
-        synchronized (mutex) {
-            if (belongsInServerPool(member)) {
+        if (belongsInServerPool(member)) {
 
-                Optional<Set<Entity>> upNodes = Optional.fromNullable(getUpNodes());
-                if (upNodes.isPresent()) {
+            Optional<Set<Entity>> upNodes = Optional.fromNullable(getUpNodes());
+            if (upNodes.isPresent()) {
 
-                    if (!upNodes.get().contains(member)) {
-                        Set<Entity> newNodes = Sets.newHashSet(getUpNodes());
-                        newNodes.add(member);
-                        setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
-
-                        //add to set of servers to be added.
-                        if (isClusterInitialized()) {
-                            addServer(member);
-                        }
-                    } else {
-                        log.warn("Node already in cluster up nodes {}: {};", this, member);
-                    }
-                } else {
-                    Set<Entity> newNodes = Sets.newHashSet();
+                if (!upNodes.get().contains(member)) {
+                    Set<Entity> newNodes = Sets.newHashSet(getUpNodes());
                     newNodes.add(member);
                     setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
 
+                    //add to set of servers to be added.
                     if (isClusterInitialized()) {
                         addServer(member);
                     }
+                } else {
+//                    log.warn("Node already in cluster up nodes {}: {};", this, member);
                 }
             } else {
-                Set<Entity> upNodes = getUpNodes();
-                if (upNodes != null && upNodes.contains(member)) {
-                    upNodes.remove(member);
-                    setAttribute(COUCHBASE_CLUSTER_UP_NODES, upNodes);
-                    log.info("Removing couchbase node {}: {}; from cluster", new Object[]{this, member});
+                Set<Entity> newNodes = Sets.newHashSet();
+                newNodes.add(member);
+                setAttribute(COUCHBASE_CLUSTER_UP_NODES, newNodes);
+
+                if (isClusterInitialized()) {
+                    addServer(member);
                 }
             }
-            if (log.isTraceEnabled()) log.trace("Done {} checkEntity {}", this, member);
+        } else {
+            Set<Entity> upNodes = getUpNodes();
+            if (upNodes != null && upNodes.contains(member)) {
+                upNodes.remove(member);
+                setAttribute(COUCHBASE_CLUSTER_UP_NODES, upNodes);
+                log.info("Removing couchbase node {}: {}; from cluster", new Object[]{this, member});
+            }
         }
+        if (log.isTraceEnabled()) log.trace("Done {} checkEntity {}", this, member);
+
     }
+
 
     protected boolean belongsInServerPool(Entity member) {
         if (!groovyTruth(member.getAttribute(Startable.SERVICE_UP))) {
@@ -223,13 +226,11 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
         return true;
     }
 
-
     protected EntitySpec<?> getMemberSpec() {
         EntitySpec<?> result = super.getMemberSpec();
         if (result != null) return result;
         return EntitySpec.create(CouchbaseNode.class);
     }
-
 
     protected int getQuorumSize() {
         Integer quorumSize = getConfig(CouchbaseCluster.INITIAL_QUORUM_SIZE);
@@ -300,5 +301,73 @@ public class CouchbaseClusterImpl extends DynamicClusterImpl implements Couchbas
     public boolean isMemberInCluster(Entity e) {
         return Optional.fromNullable(e.getAttribute(CouchbaseNode.IS_IN_CLUSTER)).or(false);
     }
-    
+
+    public void createBuckets() {
+        //FIXME: multiple buckets require synchronization/wait time (checks for port conflicts and exceeding ram size)
+        //TODO: check for multiple bucket conflicts with port
+        List<Map<String, Object>> bucketsToCreate = getConfig(CREATE_BUCKETS);
+        Entity primaryNode = getPrimaryNode();
+
+        for (Map<String, Object> bucketMap : bucketsToCreate) {
+            String bucketName = bucketMap.containsKey("bucket") ? (String) bucketMap.get("bucket") : "default";
+            String bucketType = bucketMap.containsKey("bucket-type") ? (String) bucketMap.get("bucket-type") : "couchbase";
+            Integer bucketPort = bucketMap.containsKey("bucket-port") ? (Integer) bucketMap.get("bucket-port") : 11222;
+            Integer bucketRamSize = bucketMap.containsKey("bucket-ramsize") ? (Integer) bucketMap.get("bucket-ramsize") : 200;
+            Integer bucketReplica = bucketMap.containsKey("bucket-replica") ? (Integer) bucketMap.get("bucket-replica") : 1;
+
+            log.info("adding bucket: {} to primary node: {}", bucketName, primaryNode.getId());
+            createBucket(primaryNode, bucketName, bucketType, bucketPort, bucketRamSize, bucketReplica);
+            //TODO: add if bucket has been created.
+        }
+    }
+
+    public void createBucket(final Entity primaryNode, final String bucketName, final String bucketType, final Integer bucketPort, final Integer bucketRamSize, final Integer bucketReplica) {
+        DynamicTasks.queueIfPossible(TaskBuilder.<Void>builder().name("Creating bucket " + bucketName).body(
+                new Callable<Void>() {
+                    @Override
+                    public Void call() throws Exception {
+                        DependentConfiguration.waitInTaskForAttributeReady(CouchbaseClusterImpl.this, CouchbaseCluster.BUCKET_CREATION_IN_PROGRESS, Predicates.equalTo(false));
+                        if (CouchbaseClusterImpl.this.resetBucketCreation[0] != null) {
+                            CouchbaseClusterImpl.this.resetBucketCreation[0].stop();
+                        }
+                        setAttribute(CouchbaseCluster.BUCKET_CREATION_IN_PROGRESS, true);
+
+                        CouchbaseClusterImpl.this.resetBucketCreation[0] = HttpFeed.builder()
+                                .entity(CouchbaseClusterImpl.this)
+                                .period(500, TimeUnit.MILLISECONDS)
+                                .baseUri(String.format("%s/pools/default/buckets/%s", primaryNode.getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_URL), bucketName))
+                                .credentials(primaryNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME), primaryNode.getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD))
+                                .poll(new HttpPollConfig<Boolean>(BUCKET_CREATION_IN_PROGRESS)
+                                        .onSuccess(HttpValueFunctions.responseCodeEquals(404))
+                                        .onFailureOrException(Functions.constant(false)))
+                                .build();
+
+                        Entities.invokeEffectorWithArgs(CouchbaseClusterImpl.this, primaryNode, CouchbaseNode.BUCKET_CREATE, bucketName, bucketType, bucketPort, bucketRamSize, bucketReplica);
+                        DependentConfiguration.waitInTaskForAttributeReady(CouchbaseClusterImpl.this, CouchbaseCluster.BUCKET_CREATION_IN_PROGRESS, Predicates.equalTo(false));
+                        if (CouchbaseClusterImpl.this.resetBucketCreation[0] != null) {
+                            CouchbaseClusterImpl.this.resetBucketCreation[0].stop();
+                        }
+                        return null;
+                    }
+                }
+        ).build()).orSubmitAndBlock();
+    }
+
+    public static class MemberTrackingPolicy extends AbstractMembershipTrackingPolicy {
+        @Override
+        protected void onEntityChange(Entity member) {
+            ((CouchbaseClusterImpl) entity).onServerPoolMemberChanged(member);
+        }
+
+        @Override
+        protected void onEntityAdded(Entity member) {
+            ((CouchbaseClusterImpl) entity).onServerPoolMemberChanged(member);
+        }
+
+        @Override
+        protected void onEntityRemoved(Entity member) {
+            ((CouchbaseClusterImpl) entity).onServerPoolMemberChanged(member);
+        }
+    }
+
 }

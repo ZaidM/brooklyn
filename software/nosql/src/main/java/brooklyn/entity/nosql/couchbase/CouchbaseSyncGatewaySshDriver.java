@@ -63,7 +63,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
     @Override
     public void launch() {
         Entity cbNode = entity.getConfig(CouchbaseSyncGateway.COUCHBASE_SERVER);
-        Entities.waitForServiceUp(cbNode, Duration.FIVE_MINUTES);
+        Entities.waitForServiceUp(cbNode, Duration.ONE_HOUR);
 
 
         if (cbNode instanceof CouchbaseCluster) {
@@ -104,7 +104,7 @@ public class CouchbaseSyncGatewaySshDriver extends AbstractSoftwareProcessSshDri
                 serverWebAdminUrl, bucketName, adminRestApiPort, syncRestApiPort, pool, pretty, verbose);
 
         newScript(LAUNCHING)
-                .body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway %s", options))
+                .body.append(format("/opt/couchbase-sync-gateway/bin/sync_gateway %s &", options))
                 .execute();
     }
 

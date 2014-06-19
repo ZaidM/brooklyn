@@ -1,12 +1,11 @@
 package brooklyn.entity.nosql.couchbase;
 
-import static brooklyn.util.ssh.BashCommands.INSTALL_CURL;
-import static brooklyn.util.ssh.BashCommands.alternatives;
-import static brooklyn.util.ssh.BashCommands.chainGroup;
-import static brooklyn.util.ssh.BashCommands.sudo;
+import static brooklyn.util.ssh.BashCommands.*;
 import static java.lang.String.format;
 
 import java.util.List;
+
+import com.google.common.collect.ImmutableList;
 
 import brooklyn.entity.basic.AbstractSoftwareProcessSshDriver;
 import brooklyn.entity.basic.Entities;
@@ -17,8 +16,6 @@ import brooklyn.util.ssh.BashCommands;
 import brooklyn.util.task.Tasks;
 import brooklyn.util.time.Duration;
 import brooklyn.util.time.Time;
-
-import com.google.common.collect.ImmutableList;
 
 public class CouchbaseNodeSshDriver extends AbstractSoftwareProcessSshDriver implements CouchbaseNodeDriver {
 
@@ -94,10 +91,10 @@ public class CouchbaseNodeSshDriver extends AbstractSoftwareProcessSshDriver imp
     @Override
     public void launch() {
         //FIXME needs time for http server to initialize
-        Time.sleep(Duration.TEN_SECONDS);
+        Time.sleep(Duration.THIRTY_SECONDS);
         newScript(LAUNCHING)
                 .body.append(
-                sudo("/etc/init.d/couchbase-server start"),
+                //sudo("/etc/init.d/couchbase-server start"),
                 couchbaseCli("cluster-init") +
                         getCouchbaseHostnameAndPort() +
                         " --cluster-init-username=" + getUsername() +
@@ -197,4 +194,16 @@ public class CouchbaseNodeSshDriver extends AbstractSoftwareProcessSshDriver imp
                 .execute();
     }
 
+    @Override
+    public void bucketCreate(String bucketName, String bucketType, Integer bucketPort, Integer bucketRamSize, Integer bucketReplica) {
+        newScript("bucketCreate").body.append(couchbaseCli("bucket-create")
+                + getCouchbaseHostnameAndCredentials() +
+                " --bucket=" + bucketName +
+                " --bucket-type=" + bucketType +
+                " --bucket-port=" + bucketPort +
+                " --bucket-ramsize=" + bucketRamSize +
+                " --bucket-replica=" + bucketReplica)
+                .failOnNonZeroResultCode()
+                .execute();
+    }
 }

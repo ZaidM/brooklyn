@@ -1,6 +1,7 @@
 package brooklyn.entity.nosql.couchbase;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.google.common.reflect.TypeToken;
@@ -41,8 +42,26 @@ public interface CouchbaseCluster extends DynamicCluster {
 
     @SetFromFlag("serviceUpTimeOut")
     ConfigKey<Duration> SERVICE_UP_TIME_OUT = ConfigKeys.newConfigKey(Duration.class, "couchbase.cluster.serviceUpTimeOut", "Service up time out duration for all the couchbase nodes", Duration.seconds(3 * 60));
-    
+
     @SuppressWarnings("serial")
     AttributeSensor<List<String>> COUCHBASE_CLUSTER_UP_NODE_ADDRESSES = Sensors.newSensor(new TypeToken<List<String>>() {},
-        "couchbase.cluster.node.addresses", "List of host:port of all active nodes in the cluster (http admin port, and public hostname/IP)");
+            "couchbase.cluster.node.addresses", "List of host:port of all active nodes in the cluster (http admin port, and public hostname/IP)");
+
+    AttributeSensor<Boolean> BUCKET_CREATION_IN_PROGRESS = Sensors.newBooleanSensor("couchbase.cluster.bucketCreationInProgress", "Indicates that a bucket is currently being created, and" +
+            "further bucket creation should be deferred");
+
+    /**
+     * createBuckets is a list of all the buckets to be created on the couchbase cluster
+     * the buckets will be created on the primary node of the cluster
+     * each map entry for a bucket should contain the following parameters:
+     * - <"bucket",(String) name of the bucket (default: default)>
+     * - <"bucket-type",(String) name of bucket type (default: couchbase)>
+     * - <"bucket-port",(Integer) the bucket port to connect to (default: 11222)>
+     * - <"bucket-ramsize",(Integer) ram size allowed for bucket (default: 200)>
+     * - <"bucket-replica",(Integer) number of replicas for the bucket (default: 1)>
+     */
+    @SetFromFlag("createBuckets")
+    ConfigKey<List<Map<String, Object>>> CREATE_BUCKETS = ConfigKeys.newConfigKey(new TypeToken<List<Map<String, Object>>>() {
+    }, "couchbase.cluster.createBuckets", "a list of all dedicated port buckets to be created on the couchbase cluster");
+
 }

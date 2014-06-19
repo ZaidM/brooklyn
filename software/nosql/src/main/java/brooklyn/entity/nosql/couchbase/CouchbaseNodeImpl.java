@@ -6,6 +6,13 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.base.Function;
+import com.google.common.base.Functions;
+import com.google.common.base.Preconditions;
+import com.google.common.net.HostAndPort;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+
 import brooklyn.entity.basic.Attributes;
 import brooklyn.entity.basic.SoftwareProcessImpl;
 import brooklyn.event.AttributeSensor;
@@ -25,16 +32,35 @@ import brooklyn.util.guava.MaybeFunctions;
 import brooklyn.util.guava.TypeTokens;
 import brooklyn.util.http.HttpToolResponse;
 
-import com.google.common.base.Function;
-import com.google.common.base.Functions;
-import com.google.common.base.Preconditions;
-import com.google.common.net.HostAndPort;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-
 public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseNode {
-    
+
+    protected final static Function<HttpToolResponse, JsonElement> GET_THIS_NODE_STATS = Functionals.chain(
+            HttpValueFunctions.jsonContents(),
+            JsonFunctions.walk("nodes"),
+            new Function<JsonElement, JsonElement>() {
+                @Override
+                public JsonElement apply(JsonElement input) {
+                    JsonArray nodes = input.getAsJsonArray();
+                    for (JsonElement element : nodes) {
+                        JsonElement thisNode = element.getAsJsonObject().get("thisNode");
+                        if (thisNode != null && Boolean.TRUE.equals(thisNode.getAsBoolean())) {
+                            return element.getAsJsonObject().get("interestingStats");
+                        }
+                    }
+                    return null;
+                }
+            }
+    );
     HttpFeed httpFeed;
+
+    protected final static <T> HttpPollConfig<T> getSensorFromNodeStat(AttributeSensor<T> sensor, String... jsonPath) {
+        return new HttpPollConfig<T>(sensor)
+                .onSuccess(Functionals.chain(GET_THIS_NODE_STATS,
+                        MaybeFunctions.<JsonElement>wrap(),
+                        JsonFunctions.walkM(jsonPath),
+                        JsonFunctions.castM(TypeTokens.getRawRawType(sensor.getTypeToken()), null)))
+                .onFailureOrException(Functions.<T>constant(null));
+    }
 
     @Override
     public Class<CouchbaseNodeDriver> getDriverInterface() {
@@ -49,7 +75,7 @@ public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseN
     @Override
     public void init() {
         super.init();
-        
+
         subscribe(this, Attributes.SERVICE_UP, new SensorEventListener<Boolean>() {
             @Override
             public void onEvent(SensorEvent<Boolean> booleanSensorEvent) {
@@ -92,59 +118,34 @@ public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseN
         getDriver().rebalance();
     }
 
-    protected final static Function<HttpToolResponse, JsonElement> GET_THIS_NODE_STATS = Functionals.chain(
-        HttpValueFunctions.jsonContents(), 
-        JsonFunctions.walk("nodes"), 
-        new Function<JsonElement, JsonElement>() {
-            @Override public JsonElement apply(JsonElement input) {
-                JsonArray nodes = input.getAsJsonArray();
-                for (JsonElement element : nodes) {
-                    JsonElement thisNode = element.getAsJsonObject().get("thisNode");
-                    if (thisNode!=null && Boolean.TRUE.equals(thisNode.getAsBoolean())) {
-                        return element.getAsJsonObject().get("interestingStats");
-                    }
-                }
-                return null;
-        }}
-    );
-    
-    protected final static <T> HttpPollConfig<T> getSensorFromNodeStat(AttributeSensor<T> sensor, String ...jsonPath) {
-        return new HttpPollConfig<T>(sensor)
-            .onSuccess(Functionals.chain(GET_THIS_NODE_STATS, 
-                MaybeFunctions.<JsonElement>wrap(), 
-                JsonFunctions.walkM(jsonPath), 
-                JsonFunctions.castM(TypeTokens.getRawRawType(sensor.getTypeToken()), null)))
-            .onFailureOrException(Functions.<T>constant(null));
-    }
-
     public void connectSensors() {
         super.connectSensors();
         connectServiceUpIsRunning();
-                
+
         Integer rawPort = getAttribute(CouchbaseNode.COUCHBASE_WEB_ADMIN_PORT);
         Preconditions.checkNotNull(rawPort, "HTTP_PORT sensors not set for %s; is an acceptable port available?", this);
         HostAndPort hp = BrooklynAccessUtils.getBrooklynAccessibleAddress(this, rawPort);
-        
+
         String adminUrl = String.format("http://%s:%s", hp.getHostText(), hp.getPort());
-        
+
         httpFeed = HttpFeed.builder()
-            .entity(this)
-            .period(1000)
-            .baseUri(adminUrl + "/pools/nodes/")
-            .credentialsIfNotNull(getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME), getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD))
-            .poll(getSensorFromNodeStat(CouchbaseNode.OPS, "ops"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_DOCS_DATA_SIZE, "couch_docs_data_size"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_DOCS_ACTUAL_DISK_SIZE, "couch_docs_actual_disk_size"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.EP_BG_FETCHED, "ep_bg_fetched"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.MEM_USED, "mem_used"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_VIEWS_ACTUAL_DISK_SIZE, "couch_views_actual_disk_size"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.CURR_ITEMS, "curr_items"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.VB_REPLICA_CURR_ITEMS, "vb_replica_curr_items"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_VIEWS_DATA_SIZE, "couch_views_data_size"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.GET_HITS, "get_hits"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.CMD_GET, "cmd_get"))
-            .poll(getSensorFromNodeStat(CouchbaseNode.CURR_ITEMS_TOT, "curr_items_tot"))
-            .build();
+                .entity(this)
+                .period(1000)
+                .baseUri(adminUrl + "/pools/nodes/")
+                .credentialsIfNotNull(getConfig(CouchbaseNode.COUCHBASE_ADMIN_USERNAME), getConfig(CouchbaseNode.COUCHBASE_ADMIN_PASSWORD))
+                .poll(getSensorFromNodeStat(CouchbaseNode.OPS, "ops"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_DOCS_DATA_SIZE, "couch_docs_data_size"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_DOCS_ACTUAL_DISK_SIZE, "couch_docs_actual_disk_size"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.EP_BG_FETCHED, "ep_bg_fetched"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.MEM_USED, "mem_used"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_VIEWS_ACTUAL_DISK_SIZE, "couch_views_actual_disk_size"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.CURR_ITEMS, "curr_items"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.VB_REPLICA_CURR_ITEMS, "vb_replica_curr_items"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.COUCH_VIEWS_DATA_SIZE, "couch_views_data_size"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.GET_HITS, "get_hits"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.CMD_GET, "cmd_get"))
+                .poll(getSensorFromNodeStat(CouchbaseNode.CURR_ITEMS_TOT, "curr_items_tot"))
+                .build();
     }
 
     public void disconnectSensors() {
@@ -155,5 +156,8 @@ public class CouchbaseNodeImpl extends SoftwareProcessImpl implements CouchbaseN
         }
     }
 
-
+    @Override
+    public void bucketCreate(String bucketName, String bucketType, Integer bucketPort, Integer bucketRamSize, Integer bucketReplica) {
+        getDriver().bucketCreate(bucketName, bucketType, bucketPort, bucketRamSize, bucketReplica);
+    }
 }
